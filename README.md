@@ -53,20 +53,6 @@ after two) so a free database can keep up — see [Database retention](#database
   - **`>>failsafe`** — owner-only readout of what it detects as YAGPDB and
     whether the failsafe is currently active. See [Failsafe](#failsafe-yagpdb-backup) below.
 
-## Architecture (and why not Vercel)
-
-Discord only delivers message/edit/delete events over a persistent WebSocket ("gateway")
-connection. Serverless platforms like Vercel kill each function after the request ends,
-so they physically cannot hold that connection. This bot instead runs as a small
-always-on Node.js process on a free bot host, with the archive in a free hosted
-Postgres database so nothing is lost if the bot restarts.
-
-```
-Discord gateway ──ws──> Node bot (free bot host) ──sql──> Neon Postgres (free, permanent)
-                              │
-                              └──> #server-log channel (before/after embeds)
-```
-
 ## Setup
 
 ### 1. Create the Discord application

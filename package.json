@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "backfill": "node src/backfill.js",
-    "backfill:new": "node src/backfill.js --incremental",
+    "backfill": "node src/backfill.js --incremental",
+    "backfill:all": "node src/backfill.js",
     "export-json": "node src/exportJson.js",
     "check-links": "node src/checkLinks.js"
   },

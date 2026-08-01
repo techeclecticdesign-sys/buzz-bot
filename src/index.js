@@ -204,7 +204,14 @@ function memberRoleIds(member) {
   return [...member.roles.cache.keys()].filter((id) => id !== member.guild.id).sort();
 }
 
+// `c!members` (no role) shows a server-info card; `c!members @role` lists the
+// members with that role. Both mirror Circle bot's embeds.
 async function handleMembersCommand(message, args) {
+  if (args.length === 0) {
+    await sendServerInfoCard(message);
+    return;
+  }
+
   // Accept a role mention, a role id, or a (case-insensitive) role name.
   let role = message.mentions.roles.first();
   if (!role) {
@@ -216,7 +223,7 @@ async function handleMembersCommand(message, args) {
       );
   }
   if (!role) {
-    await message.reply('Role not found. Usage: `c!members @role`');
+    await message.reply('Role not found. Usage: `c!members` or `c!members @role`');
     return;
   }
 
@@ -224,27 +231,70 @@ async function handleMembersCommand(message, args) {
   await message.guild.members.fetch();
   const withRole = role.members;
   const listed = [...withRole.values()].slice(0, MEMBER_LIST_CAP);
+  const lines = listed.map((m) => `<@${m.id}> \`${m.id}\``);
 
-  const header =
-    `Showing members in ${role.name}\n` +
-    `Listing ${listed.length} of ${withRole.size} members\n​`;
-  const lines = listed.map((m) => `@${m.user.username} (${m.id})`);
-
-  // Discord messages cap at 2000 chars; split the list across messages.
-  const chunks = [];
-  let chunk = header;
+  const heading = `Listing ${listed.length} of ${withRole.size} members`;
+  // The member list can exceed an embed's 4096-char description, so split it
+  // into as many embeds as needed; the first carries the heading.
+  const embeds = [];
+  let body = '';
+  const flush = () => {
+    const embed = new EmbedBuilder()
+      .setColor(role.color || 0x5865f2)
+      .setTitle(`Showing members in ${role.name}`)
+      .setDescription(`${embeds.length === 0 ? `${heading}\n\n` : ''}${body || '*none*'}`);
+    if (embeds.length === 0)
+      embed.setAuthor({ name: message.guild.name, iconURL: message.guild.iconURL() ?? undefined });
+    embeds.push(embed);
+    body = '';
+  };
   for (const line of lines) {
-    if (chunk.length + line.length + 1 > 2000) {
-      chunks.push(chunk);
-      chunk = line;
-    } else {
-      chunk += '\n' + line;
-    }
+    // Reserve room for the heading on the first embed.
+    const budget = DESC_MAX - (embeds.length === 0 ? heading.length + 2 : 0);
+    if (body.length + line.length + 1 > budget) flush();
+    body += (body ? '\n' : '') + line;
   }
-  chunks.push(chunk);
-  for (const content of chunks) {
-    await message.channel.send({ content, allowedMentions: { parse: [] } });
+  flush();
+
+  // Up to 10 embeds fit in one message; send in batches to be safe.
+  for (let i = 0; i < embeds.length; i += 10) {
+    await message.channel.send({
+      embeds: embeds.slice(i, i + 10),
+      allowedMentions: { parse: [] },
+    });
   }
+}
+
+// Server-info card for bare `c!members`: name + icon, member/online/boost counts.
+async function sendServerInfoCard(message) {
+  const guild = message.guild;
+  const icon = guild.iconURL({ size: 512 }) ?? undefined;
+
+  // Discord's own online tally (approximate_presence_count, via ?with_counts).
+  // This matches what other bots report; counting our local presence cache
+  // undercounts because the gateway only delivers a subset of presences.
+  let onlineValue = '—';
+  try {
+    await guild.fetch();
+    if (typeof guild.approximatePresenceCount === 'number')
+      onlineValue = guild.approximatePresenceCount.toLocaleString();
+  } catch (err) {
+    console.warn('[members] could not fetch presence count:', err.message);
+  }
+
+  // A single icon in the author line — matching the reference card. No thumbnail
+  // or full-size image (those produced the extra copies of the spinning icon).
+  const boostTier = guild.premiumTier ? ` (Level ${guild.premiumTier})` : '';
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setAuthor({ name: guild.name, iconURL: icon })
+    .addFields(
+      { name: 'Member Count', value: guild.memberCount.toLocaleString(), inline: true },
+      { name: 'Online Members', value: onlineValue, inline: true },
+      { name: 'Server Boosts', value: `${(guild.premiumSubscriptionCount ?? 0).toLocaleString()}${boostTier}`, inline: true },
+    );
+
+  await message.channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
 }
 
 async function handleCommand(message) {
