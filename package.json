@@ -1,0 +1,24 @@
+{
+  "name": "rpc-logger-bot",
+  "version": "1.0.0",
+  "description": "Discord message archive + edit/delete logging bot with permanent database storage",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "backfill": "node src/backfill.js",
+    "backfill:new": "node src/backfill.js --incremental",
+    "export-json": "node src/exportJson.js",
+    "check-links": "node src/checkLinks.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.5",
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.1"
+  },
+  "overrides": {
+    "undici": "^6.27.0"
+  }
+}
