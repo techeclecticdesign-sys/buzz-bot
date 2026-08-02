@@ -766,6 +766,11 @@ client.on('messageDelete', async (message) => {
   if (advertFailsafe.consumeSuppressedDelete(message.id)) return;
   if (!LOGGING_ENABLED) return;
   if (message.guildId && message.channelId === LOG_CHANNEL_ID) return;
+  // IGNORE_CHANNELS opt-out — matches shouldTrack (messageCreate/edit) and the
+  // bulk-delete handler. Without it, deletions in an ignored channel/category
+  // (e.g. the Adverts category) were still logged even though the posts were
+  // never archived, producing "content not archived / unknown author" embeds.
+  if (isIgnoredMessage(message)) return;
   // Honour IGNORE_BOTS by the *post's author*, not the deleter: a bot's post
   // was never archived, so don't log its deletion. A human's post is still
   // logged even when a bot deletes it (the deleter is resolved separately from

@@ -133,6 +133,33 @@ prints progress and is safe to re-run: already-archived messages are refreshed.
    Put a recurring reminder somewhere you'll see it. (Wispbyte.com is a similar
    free host that advertises no renewal requirement, if that becomes annoying.)
 
+## Run it by double-clicking
+
+Two launcher scripts let you run the bot without typing commands — handy on a
+laptop or spare desktop instead of the free host. Both live next to
+`package.json`, so **double-click** them from the `logger-bot/` folder. Each one:
+
+1. checks Node 18+ is installed and that `.env` exists (finish [Setup](#setup) first),
+2. runs `npm install` automatically on the very first launch,
+3. runs `npm run backfill` once, then
+4. starts the bot and **keeps it alive** — if it ever crashes it restarts after
+   5 seconds (same idea as running it in a terminal supervisor).
+
+Leave the window open — that's the bot running; its logs print there. **Close the
+window (or press `Ctrl+C`) to stop it.**
+
+- **Windows:** double-click **`start-bot.cmd`**.
+- **macOS:** double-click **`start-bot.command`**. macOS needs the file marked
+  executable once — in Terminal, run `chmod +x start-bot.command` in this folder
+  (or right-click the file → Open the first time to get past Gatekeeper). If Node
+  was installed with **nvm**, Finder may not see it — run the script from a
+  terminal (`./start-bot.command`) instead; the official installer and Homebrew
+  are found automatically.
+
+This is not a background service: the bot only runs while the window is open. To
+have it run unattended / survive reboots, use the free host in
+[step 6](#6-deploy-to-the-free-host) instead.
+
 ## Failsafe (YAGPDB backup)
 
 The server's automation normally runs on **YAGPDB** (nicknamed "Jarvis"). This
