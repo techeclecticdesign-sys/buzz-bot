@@ -378,6 +378,9 @@ async function runLinkCheck(client) {
       const jump = (row) => `https://discord.com/channels/${guildId}/${row.channel_id}/${row.id}`;
       const mention = (row, fallback) =>
         row.author_id ? `<@${row.author_id}>` : (row.author_tag ?? fallback);
+      // Removal notices name the member without an @mention, so a deletion never
+      // pings/highlights them — the earlier warning is the only member ping.
+      const named = (row, fallback) => row.author_tag ?? fallback;
       const deadline = autoDelete
         ? `within ${GRACE_HOURS} hours or it will be removed`
         : 'as soon as you can';
@@ -404,7 +407,7 @@ async function runLinkCheck(client) {
             `Hi ${mention(row, 'there')}, it looks like ${what} ${deadline}. ` +
             `For your convenience, [here is a link to your post](${jump(row)}). Thank you!`,
           removal:
-            `🗑️ Removed ${mention(row, 'A member')}'s post in ${where} — the dead invite ` +
+            `🗑️ Removed ${named(row, 'A member')}'s post in ${where} — the dead invite ` +
             `link wasn't fixed within ${GRACE_HOURS} hours.`,
         };
       });
@@ -438,7 +441,7 @@ async function runLinkCheck(client) {
               `this post in <#${row.channel_id}> ${deadline} — your more recent post in ` +
               `<#${keeper.channel_id}> can stay. [Here is a link to this post](${jump(row)}). Thank you!`,
             removal:
-              `🗑️ Removed ${mention(row, 'A member')}'s post in <#${row.channel_id}> — the same ` +
+              `🗑️ Removed ${named(row, 'A member')}'s post in <#${row.channel_id}> — the same ` +
               `server was advertised in more than one channel (only one is allowed).`,
           });
         }

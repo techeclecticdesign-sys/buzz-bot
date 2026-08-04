@@ -25,11 +25,22 @@
 //   Use this for cheap "catch up since last run" sweeps. Caveat: it fills gaps at
 //   the RECENT end only; if the bot missed messages in the MIDDLE of a channel's
 //   history (a stored message newer than the gap exists), run a full backfill.
+//
+// ADVERTS-ONLY MODE (`--adverts` / BACKFILL_ADVERTS_ONLY=true, or
+// `npm run backfill:adverts`): walk ONLY the configured advert channels, skipping
+//   threads and every other channel. Reaction counts ride along in each fetched
+//   message for free, so this is the cheap one-off for seeding/refreshing advert
+//   reactions across the DB WITHOUT re-scanning the huge general channels (which
+//   can run to millions of messages and take days). Same DB write path as a full
+//   backfill; JSON archiving is disabled in this mode. Run it non-incremental so
+//   reactions on already-stored adverts get refreshed. After this one-off, the
+//   live reaction handlers keep everything current.
 require('dotenv').config();
 const { Client, Events, GatewayIntentBits } = require('discord.js');
 const db = require('./db');
 const { isIgnoredChannel } = require('./ignoredChannels');
 const advertConfig = require('./advertConfig');
+const { reactionSummary } = require('./reactions');
 
 // Mirror the live bot's IGNORE_BOTS behaviour so a backfill doesn't re-seed the
 // archive with the very bot posts the running bot is configured to skip.
@@ -46,10 +57,21 @@ const OTHER_RETENTION_DAYS = Math.max(1, Number(process.env.MESSAGE_RETENTION_DA
 const RUN_STARTED_AT = Date.now(); // one consistent cutoff for the whole run
 const ADVERT_CHANNELS = new Set(advertConfig.ALL_ADVERT_CHANNELS);
 
+// Adverts-only mode: walk ONLY the configured advert channels — skipping threads
+// and every other channel entirely. This is the cheap one-off for seeding /
+// refreshing advert reaction counts without re-scanning the huge general
+// channels; reactions ride along in each fetched message for free. It's the same
+// script and the same DB write path as a full backfill, just scoped, so there's
+// no second command to maintain.
+const ADVERTS_ONLY =
+  process.argv.includes('--adverts') || process.env.BACKFILL_ADVERTS_ONLY === 'true';
+
 // When a JSON archive dir is configured we walk each channel's FULL history so
 // the offline copy is complete; the DB still only takes messages within the
 // retention window. Unset = stop at the DB cutoff (nothing older is wanted).
-const ARCHIVE_ALL = !!process.env.JSON_ARCHIVE_DIR;
+// Adverts-only never touches the JSON archive — it's a DB-only reaction refresh,
+// and re-appending advert history to the append-only archive would duplicate it.
+const ARCHIVE_ALL = !!process.env.JSON_ARCHIVE_DIR && !ADVERTS_ONLY;
 
 // Only fetch messages newer than what's already stored (see the header note).
 const INCREMENTAL =
@@ -138,7 +160,13 @@ async function backfillChannel(channel) {
         jsonCount++;
       }
       if (withinCutoff) {
-        await db.upsertMessage(msg, { archive: false, refresh: true });
+        // Advert posts carry a reaction summary (the fetched message already
+        // includes reaction counts — no extra API call). Passing `undefined`
+        // for everything else leaves the column untouched.
+        const reactions = ADVERT_CHANNELS.has(msg.channelId)
+          ? reactionSummary(msg)
+          : undefined;
+        await db.upsertMessage(msg, { archive: false, refresh: true, reactions });
         dbCount++;
       }
     }
@@ -191,8 +219,18 @@ async function backfillArchivedThreads(channel) {
 
 client.once(Events.ClientReady, async () => {
   console.log(
-    `Logged in as ${client.user.tag} — starting ${INCREMENTAL ? 'incremental ' : ''}backfill.`
+    `Logged in as ${client.user.tag} — starting ${INCREMENTAL ? 'incremental ' : ''}` +
+      `${ADVERTS_ONLY ? 'adverts-only ' : ''}backfill.`
   );
+  if (ADVERTS_ONLY) {
+    if (ADVERT_CHANNELS.size === 0) {
+      console.error('Adverts-only requested but no advert channels are configured (advertConfig). Nothing to do.');
+      await db.pool.end();
+      client.destroy();
+      process.exit(0);
+    }
+    console.log(`Adverts-only: ${ADVERT_CHANNELS.size} advert channel(s); threads and all other channels skipped.`);
+  }
   if (INCREMENTAL) {
     console.log('Incremental: only messages newer than what is already stored.');
   }
@@ -214,12 +252,16 @@ client.once(Events.ClientReady, async () => {
         (c.isTextBased() || c.isThreadOnly()) &&
         c.viewable &&
         c.id !== process.env.LOG_CHANNEL_ID &&
-        !isIgnoredChannel(c)
+        !isIgnoredChannel(c) &&
+        // Adverts-only: restrict to the configured advert channels.
+        (!ADVERTS_ONLY || ADVERT_CHANNELS.has(c.id))
     );
 
     for (const channel of targets) {
       if (channel.isTextBased()) await backfillChannel(channel);
-      if (channel.threads) {
+      // Adverts live in the channel itself, never in threads — skip thread
+      // walking entirely in adverts-only mode.
+      if (!ADVERTS_ONLY && channel.threads) {
         try {
           const active = await withRetry(
             () => channel.threads.fetchActive(),

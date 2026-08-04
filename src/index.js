@@ -18,6 +18,8 @@ const { isIgnoredMessage } = require('./ignoredChannels');
 const failsafe = require('./failsafe');
 const advertFailsafe = require('./advertFailsafe');
 const onboardingFailsafe = require('./onboardingFailsafe');
+const advertConfig = require('./advertConfig');
+const { reactionSummary } = require('./reactions');
 const retention = require('./retention');
 const linkCheck = require('./checkLinks');
 const game = require('./game');
@@ -49,13 +51,15 @@ if (needMessageIntents) {
   intents.push(
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    // Reactions serve two features: the onboarding failsafe's rules-agreement
+    // step, and keeping advert posts' reaction counts current for rpc-web.
+    GatewayIntentBits.GuildMessageReactions
   );
 }
-// Presence sees whether YAGPDB is online; reactions drive the onboarding
-// failsafe's rules-agreement step (react to the rules message -> Newbie).
+// Presence sees whether YAGPDB is online (drives the failsafes).
 if (failsafe.ENABLED) {
-  intents.push(GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildMessageReactions);
+  intents.push(GatewayIntentBits.GuildPresences);
 }
 
 const client = new Client({
@@ -142,7 +146,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Discord's delete event never says who deleted. The audit log does — but a
 // mod's repeated deletes of the same user/channel just bump a counter on one
 // entry, so we track per-entry counts to catch increments. No entry at all
-// means the author deleted their own message (self-deletes aren't audited).
+// means EITHER the author self-deleted OR a bot deleted it: Discord audits
+// neither (discord-api-docs #1611), so the two are indistinguishable here.
 const auditCounts = new Map();
 
 // Cap on retained audit-entry counters, evicting the least-recently-updated
@@ -166,8 +171,10 @@ function rememberAuditCount(id, count) {
 async function findDeleteExecutor(guild, authorId, channelId) {
   if (!guild || !authorId) return undefined; // can't match → unknown
   try {
-    // The audit entry can lag the gateway event slightly.
-    await sleep(1200);
+    // The audit entry can lag the gateway event by several seconds, so wait
+    // long enough that a real mod-delete entry has landed before we conclude
+    // there's no entry (which we can't tell apart from an author/bot delete).
+    await sleep(4500);
     const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MessageDelete, limit: 10 });
     for (const entry of logs.entries.values()) {
       const count = entry.extra?.count ?? 1;
@@ -178,7 +185,7 @@ async function findDeleteExecutor(guild, authorId, channelId) {
       const incremented = prev !== undefined && count > prev;
       if (fresh || incremented) return entry.executor;
     }
-    return null; // no matching entry → self-delete
+    return null; // no matching entry → author self-delete or bot delete (Discord audits neither)
   } catch (err) {
     console.error('[audit] fetch failed (missing View Audit Log permission?):', err.message);
     return undefined;
@@ -197,6 +204,10 @@ function shouldTrack(message) {
 const PREFIX = 'c!';
 const NICK_PREFIX = '>>';
 const MEMBER_LIST_CAP = 200;
+
+// Advert channels whose posts' reactions we keep mirrored for rpc-web. Empty
+// when no advert config is set (test/game-only), which disables the sync.
+const ADVERT_CHANNEL_SET = new Set(advertConfig.ALL_ADVERT_CHANNELS);
 
 // A member's role ids minus @everyone (whose id equals the guild id), sorted so
 // two states compare equal regardless of order.
@@ -231,7 +242,7 @@ async function handleMembersCommand(message, args) {
   await message.guild.members.fetch();
   const withRole = role.members;
   const listed = [...withRole.values()].slice(0, MEMBER_LIST_CAP);
-  const lines = listed.map((m) => `<@${m.id}> \`${m.id}\``);
+  const lines = listed.map((m) => `@${m.user.username} \`${m.id}\``);
 
   const heading = `Listing ${listed.length} of ${withRole.size} members`;
   // The member list can exceed an embed's 4096-char description, so split it
@@ -330,11 +341,12 @@ async function trackMemberChanges(member) {
   const { guild } = member;
   const tag = member.user.tag;
   const nickname = member.nickname ?? null;
+  const displayName = member.displayName ?? null;
   const roleIds = memberRoleIds(member);
 
   const state = await db.getMemberState(member.id);
   if (!state) {
-    await db.seedMemberState(member.id, tag, nickname, roleIds);
+    await db.seedMemberState(member.id, tag, nickname, roleIds, displayName);
     return;
   }
 
@@ -349,17 +361,25 @@ async function trackMemberChanges(member) {
   const after = new Set(roleIds);
   const added = [...after].filter((id) => !before.has(id));
   const removed = [...before].filter((id) => !after.has(id));
+  const embeds = [];
   for (const id of added) {
-    await db.recordRoleChange(member.id, tag, id, guild.roles.cache.get(id)?.name ?? null, 'add');
+    const name = guild.roles.cache.get(id)?.name ?? null;
+    await db.recordRoleChange(member.id, tag, id, name, 'add');
+    embeds.push(roleChangeEmbed(member, id, name, 'add'));
   }
   for (const id of removed) {
-    await db.recordRoleChange(member.id, tag, id, guild.roles.cache.get(id)?.name ?? null, 'remove');
+    const name = guild.roles.cache.get(id)?.name ?? null;
+    await db.recordRoleChange(member.id, tag, id, name, 'remove');
+    embeds.push(roleChangeEmbed(member, id, name, 'remove'));
   }
-  if ((added.length || removed.length) && (await db.getGuildSettings()).log_role_changes) {
-    await sendLog({ embeds: [roleEmbed(member, added, removed)] });
+  if (embeds.length && (await db.getGuildSettings()).log_role_changes) {
+    // One embed per change; Discord caps a message at 10 embeds, so chunk.
+    for (let i = 0; i < embeds.length; i += 10) {
+      await sendLog({ embeds: embeds.slice(i, i + 10) });
+    }
   }
 
-  await db.setMemberState(member.id, tag, nickname, roleIds);
+  await db.setMemberState(member.id, tag, nickname, roleIds, displayName);
 }
 
 // --- Settings panel (>>settings) ---
@@ -472,18 +492,21 @@ function nicknameEmbed(member, before, after) {
     .setTimestamp();
 }
 
-function roleEmbed(member, added, removed) {
-  const embed = new EmbedBuilder()
-    .setColor(0x9b59b6)
-    .setTitle('Roles updated')
-    .setThumbnail(member.user.displayAvatarURL())
-    .setDescription(memberHeader(member.user))
+// One embed per role change, styled after CircleBot's log format: the user's
+// avatar + @username as the author line, a plain-language sentence as the body,
+// and the user ID in the footer next to the timestamp. No title.
+function roleChangeEmbed(member, roleId, roleName, action) {
+  const role = roleName ?? `<@&${roleId}>`;
+  const sentence =
+    action === 'add'
+      ? `<@${member.id}> was given the ${role} role.`
+      : `<@${member.id}> was removed from the ${role} role.`;
+  return new EmbedBuilder()
+    .setColor(action === 'add' ? 0x2ecc71 : 0xe74c3c)
+    .setAuthor({ name: `@${member.user.username}`, iconURL: member.user.displayAvatarURL() })
+    .setDescription(sentence)
+    .setFooter({ text: `User ID: ${member.id}` })
     .setTimestamp();
-  if (added.length)
-    embed.addFields({ name: '➕ Added', value: truncate(added.map((id) => `<@&${id}>`).join(', '), 1024) });
-  if (removed.length)
-    embed.addFields({ name: '➖ Removed', value: truncate(removed.map((id) => `<@&${id}>`).join(', '), 1024) });
-  return embed;
 }
 
 function profileNameEmbed(user, c) {
@@ -767,19 +790,24 @@ client.on('messageDelete', async (message) => {
   if (!LOGGING_ENABLED) return;
   if (message.guildId && message.channelId === LOG_CHANNEL_ID) return;
   // IGNORE_CHANNELS opt-out — matches shouldTrack (messageCreate/edit) and the
-  // bulk-delete handler. Without it, deletions in an ignored channel/category
-  // (e.g. the Adverts category) were still logged even though the posts were
-  // never archived, producing "content not archived / unknown author" embeds.
+  // bulk-delete handler, so a channel we don't archive isn't logged on delete.
   if (isIgnoredMessage(message)) return;
   // Honour IGNORE_BOTS by the *post's author*, not the deleter: a bot's post
   // was never archived, so don't log its deletion. A human's post is still
   // logged even when a bot deletes it (the deleter is resolved separately from
-  // the audit log). Only decidable for cached (non-partial) messages — an
-  // uncached bot post has no author to test, but it also has no stored row.
+  // the audit log). This catches cached (non-partial) bot posts; uncached ones
+  // have no author to test and are handled after the stored-row lookup below.
   if (IGNORE_BOTS && message.author?.bot) return;
   try {
     const stored = await db.getMessage(message.id);
     if (!stored && !message.guildId) return; // uncached DM, nothing to report
+    // Uncached bot post: with IGNORE_BOTS on we never archived it, so there's no
+    // stored row AND no cached author to identify it. Logging it yields a useless
+    // "unknown / content not archived" embed. The recurring advert-channel case
+    // is YAGPDB's sticky embed, which it deletes and reposts after every advert.
+    // A human post is archived on create, so a missing row + missing author here
+    // means it was a bot (or predates the bot — also not worth an embed).
+    if (IGNORE_BOTS && !stored && !message.author) return;
 
     const authorLine = stored
       ? `<@${stored.author_id}> (\`${stored.author_tag}\`)`
@@ -800,7 +828,7 @@ client.on('messageDelete', async (message) => {
     const executor = await findDeleteExecutor(message.guild, authorId, message.channelId);
     const deletedBy =
       executor ? `${executor} (\`${executor.tag}\`)`
-      : executor === null ? 'the author (self-delete)'
+      : executor === null ? 'Not in audit log (deleted either by author or a bot).'
       : '*unknown*';
 
     // A stored row or a still-cached (non-partial) message means we know the
@@ -833,7 +861,7 @@ client.on('messageDelete', async (message) => {
       type: 'delete',
       id: message.id,
       authorTag: stored?.author_tag ?? message.author?.tag ?? null,
-      deletedBy: executor?.tag ?? (executor === null ? 'self' : null),
+      deletedBy: executor?.tag ?? (executor === null ? 'author-or-bot' : null),
       content: stored ? stored.content : message.content ?? null,
       at: new Date().toISOString(),
     });
@@ -917,13 +945,55 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
   }
 });
 
+// Keep advert posts' stored reactions current. A single reaction add/remove only
+// tells us about one emoji, and the counts on a partial event can be stale, so
+// we refetch the whole message and rewrite its full reaction summary — the
+// message is the source of truth. Gated to advert channels; no-ops elsewhere.
+async function syncAdvertReactions(reaction) {
+  if (!LOGGING_ENABLED) return;
+  const channelId = reaction.message?.channelId;
+  if (!channelId || !ADVERT_CHANNEL_SET.has(channelId)) return;
+  let message = reaction.message;
+  try {
+    message = await message.fetch(); // force-refetch => authoritative reactions
+  } catch {
+    return; // message deleted before we could read it
+  }
+  try {
+    await db.setReactions(message.id, reactionSummary(message));
+  } catch (err) {
+    console.error('[reactions] db error:', err.message);
+  }
+}
+
+client.on(Events.MessageReactionAdd, (reaction) => {
+  syncAdvertReactions(reaction);
+});
+client.on(Events.MessageReactionRemove, (reaction) => {
+  syncAdvertReactions(reaction);
+});
+client.on(Events.MessageReactionRemoveEmoji, (reaction) => {
+  syncAdvertReactions(reaction);
+});
+// Removing all reactions gives a message, not a reaction — clear the column.
+client.on(Events.MessageReactionRemoveAll, async (message) => {
+  if (!LOGGING_ENABLED) return;
+  if (!message?.channelId || !ADVERT_CHANNEL_SET.has(message.channelId)) return;
+  try {
+    await db.setReactions(message.id, null);
+  } catch (err) {
+    console.error('[reactions] db error:', err.message);
+  }
+});
+
 // Seed a baseline for brand-new members so their first nickname/role change is
 // captured (trackMemberChanges only logs once a baseline exists).
 client.on(Events.GuildMemberAdd, async (member) => {
   if (LOGGING_ENABLED) {
     try {
       await db.seedMemberState(
-        member.id, member.user.tag, member.nickname ?? null, memberRoleIds(member)
+        member.id, member.user.tag, member.nickname ?? null,
+        memberRoleIds(member), member.displayName ?? null
       );
       await db.seedUserState(member.id, member.user.username, member.user.globalName ?? null);
     } catch (err) {
@@ -1028,7 +1098,8 @@ client.once(Events.ClientReady, async () => {
         if (LOGGING_ENABLED) {
           for (const member of members.values()) {
             await db.seedMemberState(
-              member.id, member.user.tag, member.nickname ?? null, memberRoleIds(member)
+              member.id, member.user.tag, member.nickname ?? null,
+              memberRoleIds(member), member.displayName ?? null
             );
             await db.seedUserState(member.id, member.user.username, member.user.globalName ?? null);
           }

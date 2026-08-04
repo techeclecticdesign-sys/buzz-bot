@@ -51,6 +51,10 @@ async function init() {
   // guild_id is not part of the messages PK, so these drop cleanly in place.
   await pool.query('ALTER TABLE messages DROP COLUMN IF EXISTS guild_id;');
   await pool.query('ALTER TABLE messages DROP COLUMN IF EXISTS attachments;');
+  // Reaction summary for advert posts (only advert channels are populated). Each
+  // element is { id, name, animated, count }; NULL means no reactions. Kept live
+  // by the reaction handlers and (re)seeded by backfill from the fetched message.
+  await pool.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions JSONB;');
   await pool.query(
     'CREATE INDEX IF NOT EXISTS messages_channel_idx ON messages (channel_id);'
   );
@@ -114,6 +118,12 @@ async function init() {
       END IF;
     END $$;
   `);
+  // display_name = what Discord actually renders (nickname ?? globalName ??
+  // username). nickname alone is NULL for members who never set a server nick,
+  // so it's the wrong thing to display; this column carries the real label.
+  await pool.query(
+    'ALTER TABLE member_state ADD COLUMN IF NOT EXISTS display_name TEXT;'
+  );
 
   // Append-only history: one row per nickname change (new value; NULL = reset
   // to plain username) and one row per role add/remove.
@@ -237,7 +247,13 @@ function archiveMessageJson(msg) {
 // Insert a message into the DB archive. By default also mirrors it to the JSON
 // archive on first insert; pass { archive: false } when the caller handles the
 // JSON side itself (backfill, which archives on a different — all-time — cutoff).
-async function upsertMessage(msg, { archive = true, refresh = false } = {}) {
+//
+// `reactions` (a reactionSummary array, or null) is only written when the key is
+// present in opts — omitting it leaves the column untouched, so a plain content
+// edit never clobbers a post's stored reactions. Live message creates omit it
+// (a new message has none); backfill passes it for advert posts.
+async function upsertMessage(msg, { archive = true, refresh = false, reactions } = {}) {
+  const hasReactions = reactions !== undefined;
   const params = [
     msg.id,
     msg.channelId,
@@ -246,27 +262,55 @@ async function upsertMessage(msg, { archive = true, refresh = false } = {}) {
     msg.content ?? '',
     msg.createdAt,
   ];
-  if (refresh) params.push(msg.editedAt ?? null);
+
+  const cols = ['id', 'channel_id', 'author_id', 'author_tag', 'content', 'created_at'];
+  const vals = ['$1', '$2', '$3', '$4', '$5', '$6'];
+
+  let editedIdx;
+  if (refresh) {
+    params.push(msg.editedAt ?? null);
+    editedIdx = params.length;
+  }
+  let reactionsIdx;
+  if (hasReactions) {
+    params.push(reactions === null ? null : JSON.stringify(reactions));
+    reactionsIdx = params.length;
+    cols.push('reactions');
+    vals.push(`$${reactionsIdx}`);
+  }
+
+  let onConflict = 'NOTHING';
+  if (refresh) {
+    const sets = [
+      'channel_id = EXCLUDED.channel_id',
+      'author_id = EXCLUDED.author_id',
+      'author_tag = EXCLUDED.author_tag',
+      'content = EXCLUDED.content',
+      `edited_at = $${editedIdx}`,
+      'deleted_at = NULL',
+    ];
+    if (hasReactions) sets.push(`reactions = $${reactionsIdx}`);
+    onConflict = `UPDATE SET ${sets.join(', ')} RETURNING (xmax = 0) AS inserted`;
+  }
+
   const res = await query(
-    `INSERT INTO messages (id, channel_id, author_id, author_tag, content, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (id) DO ${
-       refresh
-         ? `UPDATE SET
-              channel_id = EXCLUDED.channel_id,
-              author_id = EXCLUDED.author_id,
-              author_tag = EXCLUDED.author_tag,
-              content = EXCLUDED.content,
-              edited_at = $7,
-              deleted_at = NULL
-            RETURNING (xmax = 0) AS inserted`
-         : 'NOTHING'
-     }`,
+    `INSERT INTO messages (${cols.join(', ')})
+     VALUES (${vals.join(', ')})
+     ON CONFLICT (id) DO ${onConflict}`,
     params
   );
   const inserted = refresh ? res.rows[0]?.inserted === true : res.rowCount === 1;
   if (inserted && archive) archiveMessageJson(msg);
   return inserted;
+}
+
+// Overwrite just the reaction summary for a stored message (no-op if the message
+// isn't archived). Pass null to clear. Driven by the live reaction handlers.
+async function setReactions(id, reactions) {
+  await query(
+    'UPDATE messages SET reactions = $2 WHERE id = $1',
+    [id, reactions == null ? null : JSON.stringify(reactions)]
+  );
 }
 
 async function getMessage(id) {
@@ -304,23 +348,27 @@ async function getMemberState(userId) {
 }
 
 // Insert a baseline only if we've never seen this member — never clobbers an
-// existing state (used when priming on startup / member join).
-async function seedMemberState(userId, userTag, nickname, roleIds) {
+// existing state (used when priming on startup / member join). The one
+// exception is display_name: an existing NULL is backfilled from the seed so a
+// plain restart populates the column for members recorded before it existed.
+async function seedMemberState(userId, userTag, nickname, roleIds, displayName = null) {
   await query(
-    `INSERT INTO member_state (user_id, user_tag, nickname, role_ids, updated_at)
-     VALUES ($1, $2, $3, $4, now())
-     ON CONFLICT (user_id) DO NOTHING`,
-    [userId, userTag, nickname, roleIds]
+    `INSERT INTO member_state (user_id, user_tag, nickname, display_name, role_ids, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (user_id)
+       DO UPDATE SET display_name = COALESCE(member_state.display_name, EXCLUDED.display_name)`,
+    [userId, userTag, nickname, displayName, roleIds]
   );
 }
 
-async function setMemberState(userId, userTag, nickname, roleIds) {
+async function setMemberState(userId, userTag, nickname, roleIds, displayName = null) {
   await query(
-    `INSERT INTO member_state (user_id, user_tag, nickname, role_ids, updated_at)
-     VALUES ($1, $2, $3, $4, now())
+    `INSERT INTO member_state (user_id, user_tag, nickname, display_name, role_ids, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now())
      ON CONFLICT (user_id)
-       DO UPDATE SET user_tag = $2, nickname = $3, role_ids = $4, updated_at = now()`,
-    [userId, userTag, nickname, roleIds]
+       DO UPDATE SET user_tag = $2, nickname = $3, display_name = $4,
+                     role_ids = $5, updated_at = now()`,
+    [userId, userTag, nickname, displayName, roleIds]
   );
 }
 
@@ -529,6 +577,7 @@ module.exports = {
   pool,
   init,
   upsertMessage,
+  setReactions,
   archiveMessageJson,
   pruneMessagesInChannels,
   pruneMessagesNotInChannels,

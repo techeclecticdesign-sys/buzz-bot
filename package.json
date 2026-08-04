@@ -7,6 +7,7 @@
     "start": "node src/index.js",
     "backfill": "node src/backfill.js --incremental",
     "backfill:all": "node src/backfill.js",
+    "backfill:adverts": "node src/backfill.js --adverts",
     "export-json": "node src/exportJson.js",
     "check-links": "node src/checkLinks.js"
   },

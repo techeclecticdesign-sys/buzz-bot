@@ -8,8 +8,10 @@ after two) so a free database can keep up — see [Database retention](#database
 
 - **Edit** → orange embed with Before / After + jump link
 - **Delete** → red embed with the original content, author, and **who deleted it**
-  (from the audit log; self-deletes are labeled as such). Attachment names are
-  shown only for messages still in the bot's live cache — they aren't archived.
+  (from the audit log). Discord doesn't audit deletions by the author or by a
+  bot, so those can't be told apart and are shown as "Not in audit log (deleted
+  either by author or a bot)." Attachment names are shown only for messages still
+  in the bot's live cache — they aren't archived.
 - **Bulk delete** (bans, purges) → one embed + a full `.txt` transcript attached
 - **Name change** → embed whenever a member changes their **nickname**, **@username**,
   or **display name**. Always on.
