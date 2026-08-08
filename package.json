@@ -9,7 +9,8 @@
     "backfill:all": "node src/backfill.js",
     "backfill:adverts": "node src/backfill.js --adverts",
     "export-json": "node src/exportJson.js",
-    "check-links": "node src/checkLinks.js"
+    "check-links": "node src/checkLinks.js",
+    "migrate:supabase": "node scripts/migrate-to-supabase.js"
   },
   "engines": {
     "node": ">=18"

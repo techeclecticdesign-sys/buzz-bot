@@ -137,7 +137,7 @@ async function refreshCurrentPosts(client, rows) {
 const postTime = (row) => (row.created_at ? new Date(row.created_at).getTime() : 0);
 
 // Run one offense type through the warn→grace→delete pipeline. `entries` is a
-// list of { row, warn, removal } (pre-built message strings); `reason` keys the
+// list of { row, warn } (pre-built message strings); `reason` keys the
 // persisted grace clock so different offenses track independently. Posts past
 // the grace window and still in violation are deleted; new offenses are warned
 // once. Returns { warned, deleted }. Shared by dead-link and duplicate-server
@@ -153,17 +153,17 @@ async function enforce(
   const now = Date.now();
   let warned = 0;
   let deleted = 0;
-  for (const { row, warn, removal } of entries) {
+  for (const { row, warn } of entries) {
     const flaggedAt = flags.get(row.id);
     const expired = flaggedAt && now - flaggedAt.getTime() >= graceMs;
 
-    // Past the grace window and still in violation → remove the post.
+    // Past the grace window and still in violation → remove the post silently.
+    // No removal notice is posted to the channel (it would call out the member).
     if (autoDelete && expired) {
       const ok = await deletePost(client, row);
       if (ok) {
         deleted++;
         await db.clearFlaggedPosts([row.id], reason);
-        await channel.send({ content: removal, allowedMentions: { parse: [] } });
       }
       await sleep(DELAY_MS); // keep the flag on failure so the next sweep retries
       continue;
@@ -378,9 +378,6 @@ async function runLinkCheck(client) {
       const jump = (row) => `https://discord.com/channels/${guildId}/${row.channel_id}/${row.id}`;
       const mention = (row, fallback) =>
         row.author_id ? `<@${row.author_id}>` : (row.author_tag ?? fallback);
-      // Removal notices name the member without an @mention, so a deletion never
-      // pings/highlights them — the earlier warning is the only member ping.
-      const named = (row, fallback) => row.author_tag ?? fallback;
       const deadline = autoDelete
         ? `within ${GRACE_HOURS} hours or it will be removed`
         : 'as soon as you can';
@@ -406,9 +403,6 @@ async function runLinkCheck(client) {
           warn:
             `Hi ${mention(row, 'there')}, it looks like ${what} ${deadline}. ` +
             `For your convenience, [here is a link to your post](${jump(row)}). Thank you!`,
-          removal:
-            `🗑️ Removed ${named(row, 'A member')}'s post in ${where} — the dead invite ` +
-            `link wasn't fixed within ${GRACE_HOURS} hours.`,
         };
       });
 
@@ -440,9 +434,6 @@ async function runLinkCheck(client) {
               `Group servers may only be advertised in one channel at a time, so please remove ` +
               `this post in <#${row.channel_id}> ${deadline} — your more recent post in ` +
               `<#${keeper.channel_id}> can stay. [Here is a link to this post](${jump(row)}). Thank you!`,
-            removal:
-              `🗑️ Removed ${named(row, 'A member')}'s post in <#${row.channel_id}> — the same ` +
-              `server was advertised in more than one channel (only one is allowed).`,
           });
         }
       }

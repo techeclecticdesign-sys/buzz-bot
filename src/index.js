@@ -203,6 +203,13 @@ function shouldTrack(message) {
 
 const PREFIX = 'c!';
 const NICK_PREFIX = '>>';
+
+// Roles allowed to run `c!threadkill`.
+const THREADKILL_STAFF_ROLES = [
+  '300831005621878784',
+  '322845008409395200',
+  '479484736188973087',
+];
 const MEMBER_LIST_CAP = 200;
 
 // Advert channels whose posts' reactions we keep mirrored for rpc-web. Empty
@@ -213,6 +220,31 @@ const ADVERT_CHANNEL_SET = new Set(advertConfig.ALL_ADVERT_CHANNELS);
 // two states compare equal regardless of order.
 function memberRoleIds(member) {
   return [...member.roles.cache.keys()].filter((id) => id !== member.guild.id).sort();
+}
+
+// A no-arg guild.members.fetch() goes out over the gateway as opcode 8 (Request
+// Guild Members) to chunk the whole member list, which Discord rate-limits hard
+// ("Request with opcode 8 was rate limited"). Startup already primes the full
+// cache and the GuildMembers intent keeps it live, so re-fetching on every
+// command is redundant *and* the thing that trips the limit. Only refetch when
+// the cache is genuinely incomplete, and dedupe concurrent/rapid callers behind
+// one in-flight fetch so a burst of commands can't stack opcode-8 requests.
+const memberFetches = new Map(); // guild.id -> { promise, at }
+const MEMBER_REFETCH_COOLDOWN_MS = 60_000;
+async function ensureGuildMembers(guild) {
+  if (guild.members.cache.size >= guild.memberCount) return; // cache complete
+  const existing = memberFetches.get(guild.id);
+  if (existing && Date.now() - existing.at < MEMBER_REFETCH_COOLDOWN_MS) {
+    await existing.promise.catch(() => {});
+    return;
+  }
+  const promise = guild.members.fetch();
+  memberFetches.set(guild.id, { promise, at: Date.now() });
+  try {
+    await promise;
+  } catch (err) {
+    console.warn(`[members] fetch failed for ${guild.name}:`, err.message);
+  }
 }
 
 // `c!members` (no role) shows a server-info card; `c!members @role` lists the
@@ -238,8 +270,8 @@ async function handleMembersCommand(message, args) {
     return;
   }
 
-  // role.members only reflects the member cache; fetch everyone first.
-  await message.guild.members.fetch();
+  // role.members only reflects the member cache; make sure it's complete first.
+  await ensureGuildMembers(message.guild);
   const withRole = role.members;
   const listed = [...withRole.values()].slice(0, MEMBER_LIST_CAP);
   const lines = listed.map((m) => `@${m.user.username} \`${m.id}\``);
@@ -308,10 +340,78 @@ async function sendServerInfoCard(message) {
   await message.channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
 }
 
+// `c!threadkill <thread id>` — staff-only. Deletes ONLY threads: a resolved
+// channel is deleted solely when `isThread()` is true, so regular channels are
+// never touched, and a message id (which resolves to no channel) is a no-op.
+async function handleThreadkillCommand(message, args) {
+  const isStaff = message.member?.roles.cache.hasAny(...THREADKILL_STAFF_ROLES);
+  if (!isStaff) {
+    await message.reply('You do not have permission to use this command.');
+    return;
+  }
+
+  // Accept a raw id or a <#id> channel mention.
+  const id = (args[0] ?? '').match(/\d{5,}/)?.[0];
+  if (!id) {
+    await message.reply('Usage: `c!threadkill <thread id>`');
+    return;
+  }
+
+  let channel = message.guild.channels.cache.get(id) ?? null;
+  if (!channel) {
+    try {
+      channel = await message.guild.channels.fetch(id);
+    } catch {
+      channel = null;
+    }
+  }
+  if (!channel) {
+    await message.reply(`No thread found with id \`${id}\`. Nothing was deleted.`);
+    return;
+  }
+
+  // Hard guard: refuse to delete anything that isn't a thread.
+  if (!channel.isThread()) {
+    await message.reply(
+      `\`${id}\` is **${channel.name ?? 'that channel'}**, which is not a thread. Nothing was deleted.`
+    );
+    return;
+  }
+
+  // Only delete empty threads. Forum/media posts carry a starter message that
+  // shares the thread's id — ignore that; any other message means it's not
+  // empty. This also covers regular threads (which fetch as zero messages when
+  // empty, since their starter lives in the parent channel).
+  try {
+    const recent = await channel.messages.fetch({ limit: 3 });
+    const others = recent.filter((m) => m.id !== channel.id);
+    if (others.size > 0) {
+      await message.reply(
+        `Thread **${channel.name}** (\`${id}\`) is not empty. Nothing was deleted.`
+      );
+      return;
+    }
+  } catch (err) {
+    await message.reply(
+      `Couldn't verify whether thread \`${id}\` is empty: ${err.message}. Nothing was deleted.`
+    );
+    return;
+  }
+
+  const name = channel.name;
+  try {
+    await channel.delete(`c!threadkill by ${message.author.tag} (${message.author.id})`);
+    await message.reply(`Deleted thread **${name}** (\`${id}\`).`);
+  } catch (err) {
+    await message.reply(`Failed to delete thread \`${id}\`: ${err.message}`);
+  }
+}
+
 async function handleCommand(message) {
   const [cmd, ...args] = message.content.slice(PREFIX.length).trim().split(/\s+/);
   try {
     if (cmd.toLowerCase() === 'members') await handleMembersCommand(message, args);
+    else if (cmd.toLowerCase() === 'threadkill') await handleThreadkillCommand(message, args);
   } catch (err) {
     console.error(`[command] ${cmd} error:`, err.message);
   }
@@ -580,7 +680,7 @@ async function resolveUser(message, args) {
     if (byId) return byId;
   }
 
-  await message.guild.members.fetch();
+  await ensureGuildMembers(message.guild);
   const member = message.guild.members.cache.find(
     (m) =>
       m.user.username.toLowerCase() === q.toLowerCase() ||
@@ -1000,8 +1100,9 @@ client.on(Events.GuildMemberAdd, async (member) => {
       console.error('[member-add] db error:', err.message);
     }
   }
-  // Failsafe: while YAGPDB is offline, take over its join automation. Kept in a
-  // separate try so a DB hiccup above never blocks it (and vice versa).
+  // Assign the Age Please gate role on join (always, so it's applied instantly
+  // rather than waiting on YAGPDB — the add is idempotent if YAGPDB assigns too).
+  // Kept in a separate try so a DB hiccup above never blocks it (and vice versa).
   try {
     await failsafe.handleMemberJoin(member, sendLog);
   } catch (err) {

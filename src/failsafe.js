@@ -77,32 +77,46 @@ function offlineForMs(guild) {
   return last === undefined ? Infinity : Date.now() - last;
 }
 
-// Assign the Age Please role on join — but only while YAGPDB is offline.
+// Assign the Age Please role on join — always, as soon as a member joins, so the
+// gate is applied immediately rather than waiting on YAGPDB. YAGPDB normally
+// assigns it too; role adds are idempotent (roles are a set), so both firing is
+// harmless — whoever is second is a no-op, and the cache check below skips even
+// that redundant call when the role is already present.
+//
 // `sendLog` is index.js's log-channel sender, passed in to avoid a circular
-// require. Role adds are idempotent, so a brief overlap with a reconnecting
-// YAGPDB is harmless.
+// require. The log-channel embed is reserved for the notable case — YAGPDB
+// actually being offline — so normal joins don't spam the log; those get a plain
+// console line instead.
 async function handleMemberJoin(member, sendLog) {
   if (!ENABLED) return;
   if (member.user.bot) return; // gate roles are for people, not bots
   const { guild } = member;
-  if (isYagpdbOnline(guild)) return; // YAGPDB is up; it owns the join flow.
+  const yagpdbDown = !isYagpdbOnline(guild);
 
   const role = guild.roles.cache.get(AGE_PLEASE_ROLE_ID);
   if (!role) {
     console.error(`[failsafe] Age Please role ${AGE_PLEASE_ROLE_ID} not found in ${guild.name}`);
     return;
   }
-  if (member.roles.cache.has(role.id)) return;
+  if (member.roles.cache.has(role.id)) return; // already has it (e.g. YAGPDB beat us)
 
   try {
-    await member.roles.add(role, 'Failsafe: YAGPDB offline — Age Please on join');
-    console.log(`[failsafe] assigned Age Please to ${member.user.tag} (YAGPDB offline)`);
-    if (sendLog) {
+    const reason = yagpdbDown
+      ? 'Failsafe: YAGPDB offline — Age Please on join'
+      : 'Age Please on join';
+    await member.roles.add(role, reason);
+    console.log(
+      `[failsafe] assigned Age Please to ${member.user.tag}` +
+      (yagpdbDown ? ' (YAGPDB offline)' : '')
+    );
+    // Only surface the orange failsafe embed when YAGPDB is genuinely down;
+    // logging every normal join would flood the log channel.
+    if (sendLog && yagpdbDown) {
       const embed = new EmbedBuilder()
         .setColor(0xe67e22)
         .setTitle('⚠️ Failsafe: Age Please assigned')
         .setDescription(
-          'YAGPDB appears to be **offline**, so I assigned the failsafe join role.\n\n' +
+          'YAGPDB appears to be **offline**, so I assigned the join role.\n\n' +
           `**Member:** <@${member.id}> (\`${member.user.username}\`)\n` +
           `**Role:** ${role} \`${role.name}\``
         )

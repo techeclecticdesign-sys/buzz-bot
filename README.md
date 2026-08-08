@@ -336,10 +336,8 @@ Options:
 - **Auto-deletion (enforcement):** `LINK_CHECK_GRACE_HOURS` (default `24`) is the
   grace period between the first warning and the bot **deleting** the post if it's
   still in violation. With the daily sweep that's: warned on day 1, deleted on
-  day 2 if still bad. On deletion an un-pinged notice is posted to the notify
-  channel (e.g. `🗑️ Removed @Mario's post in #fandom_groups — the same server was
-  advertised in more than one channel (only one is allowed).`). Requirements and
-  safety:
+  day 2 if still bad. Deletion is **silent** — no removal notice is posted to the
+  notify channel (it would call out the member). Requirements and safety:
   - Needs the **Manage Messages** permission and `LINK_CHECK_NOTIFY_CHANNEL_ID`
     set — a post is **never deleted without the author having been warned first**.
   - The grace clock is stored in the DB (`flagged_posts`, keyed by post + reason),
