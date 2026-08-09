@@ -185,22 +185,9 @@ async function reject(message, sendLog, name, channelName, dm, tag, noun = 'adve
   } catch {
     /* author has DMs closed — the post is already removed, nothing else to do */
   }
-  if (sendLog) {
-    await sendLog({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xe67e22)
-          .setTitle(`⚠️ Failsafe: ${noun} removed`)
-          .setDescription(
-            `YAGPDB is offline — removed a post that failed the **${tag}** check.\n\n` +
-              `**Member:** <@${message.author.id}> (\`${message.author.username}\`)\n` +
-              `**Channel:** <#${message.channelId}>`
-          )
-          .addFields({ name: 'Post', value: truncate(content || '*(no text)*', 1024) })
-          .setTimestamp(),
-      ],
-    });
-  }
+  // No general-log echo for a successful removal: infractions do not go to
+  // general logs. (The missing-permissions warning above is kept — that's an
+  // operational "the failsafe couldn't act" alert, not an infraction record.)
 }
 
 async function crossChannelDup(message, content) {
@@ -238,22 +225,8 @@ async function postAdvisory(message, sendLog, issues, opts = {}) {
       /* emoji unavailable or missing Add Reactions — non-fatal */
     }
   }
-  if (sendLog) {
-    await sendLog({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xf1c40f)
-          .setTitle(title)
-          .setDescription(
-            `${headline}\n\n` +
-              `**Member:** <@${message.author.id}> (\`${message.author.username}\`)\n` +
-              `**Channel:** <#${message.channelId}>\n` +
-              `**Issues:** ${issues.length}`
-          )
-          .setTimestamp(),
-      ],
-    });
-  }
+  // No general-log echo: the advisory already lives in #rule_infractions and the
+  // :staffpending: flag sits on the post. Infractions do not go to general logs.
 }
 
 // ---- Shared checks, reused by both the create failsafe and the edit trigger ----
