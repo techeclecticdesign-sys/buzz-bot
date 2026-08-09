@@ -15,6 +15,10 @@ after two) so a free database can keep up — see [Database retention](#database
 - **Bulk delete** (bans, purges) → one embed + a full `.txt` transcript attached
 - **Name change** → embed whenever a member changes their **nickname**, **@username**,
   or **display name**. Always on.
+- **Join / leave** → green embed when a member **joins** (with account-creation
+  date and the new member count) and a red embed when they **leave** (kick/ban
+  included, with the date they joined, roles they held, and the new count).
+  Always on.
 - **Role change** → embed when a member gains or loses roles. **Off by default**
   (it's noisy on servers with onboarding flows / role menus) — turn it on with
   `>>settings`.
@@ -40,8 +44,8 @@ after two) so a free database can keep up — see [Database retention](#database
     **Log channel posting** switch (**off by default** — the bot archives to the
     database silently until you turn it on) pauses/resumes all posts to the log
     channel; while off, messages are still archived and only the channel output
-    stops. Also a toggle for role-change logging. Edits, deletions, and name
-    changes are always on and shown as locked switches.
+    stops. Also a toggle for role-change logging. Edits, deletions, name
+    changes, and joins/leaves are always on and shown as locked switches.
 - **Failsafe (YAGPDB backup):** when the YAGPDB bot ("Jarvis") goes **offline**,
   this bot takes over specific pieces of its automation until it returns. While
   **any** YAGPDB instance is online, the failsafe stays completely dormant.
@@ -52,8 +56,16 @@ after two) so a free database can keep up — see [Database retention](#database
     (Rules Please → Newbie), reproducing YAGPDB's embeds and underage kick.
   - **Advert enforcement** — mirror YAGPDB's advert commands (length, cooldown,
     duplicates, banned words, etc.).
+  - **Member intros** — mirror YAGPDB's "Member Intros" command (800-character
+    limit + one intro per member) for the introductions channel.
   - **`>>failsafe`** — owner-only readout of what it detects as YAGPDB and
     whether the failsafe is currently active. See [Failsafe](#failsafe-yagpdb-backup) below.
+- **Advert checks on edits (always on):** YAGPDB's free tier can't run custom
+  commands when a message is *edited*, so a member could post a clean ad and then
+  edit in something that breaks the rules. This bot re-runs the same content
+  checks on every advert-channel edit — **whether or not YAGPDB is online** — so
+  that hole is closed permanently. See
+  [Advert checks on edits](#advert-checks-on-edits).
 
 ## Setup
 
@@ -227,6 +239,18 @@ For the strongest match you can pin the exact bot user id(s) with `YAGPDB_BOT_ID
      shared in `advertConfig.base.js`. If a variant has no channels the task stays
      inactive (the boot log says so).
 
+4. **Member intros** — a direct port of YAGPDB's "Member Intros" command (its
+   own rules, **not** the advert rules) for the `#member_introductions` channel:
+   - **Length (hard):** an intro over **800 characters** is deleted and the author
+     is DM'd (character count, matching YAGPDB's patched limit).
+   - **One intro per member (hard):** posting a second intro while one already
+     stands is deleted and DM'd, pointing at the existing intro to delete.
+   - **Setup:** set `introChannelId` in the per-server advert config
+     (`src/advertConfig.live.js` / `.test.js`); unset = the task stays dormant.
+     The DM's "member intro rules" link uses `introRulesMessageId` (defaults to
+     the live pinned rules post). Like the advert failsafe, it does not touch
+     YAGPDB's data.
+
 **Requirements.**
 - **Presence Intent** enabled (see Setup step 3). If you can't enable it, set
   `FAILSAFE_ENABLED=false` — the bot then drops the intent and the failsafe stays
@@ -246,6 +270,51 @@ confirm detection matched your YAGPDB without waiting for a real outage.
 offline. It doesn't debounce brief YAGPDB reconnects; because a reconnect
 usually doesn't flip Discord presence to "offline," this is rarely an issue, but
 a "must be offline for N seconds" guard can be added if it ever misfires.
+
+## Advert checks on edits
+
+Running a custom command on a **message edit** is a YAGPDB *premium* feature, so
+on our free tier nothing checks an ad after it's first posted. That leaves an
+obvious hole: post a clean advert (which passes), then **edit** it to add a
+banned word, a disallowed link/image/header, blow past the length limit, or
+paste a copy of your ad from another channel — YAGPDB never re-checks it.
+
+This bot closes that hole by re-running the advert **content** checks on every
+edit in a configured advert channel. It shares the exact same check code the
+[advert failsafe](#failsafe-yagpdb-backup) uses. **Edits are non-destructive** —
+nothing is deleted out from under someone mid-edit; every finding is an advisory
+that goes into **one combined ping to #rule_infractions** (plus the
+`:staffpending:` flag on the ad), same as a new post's advisory pings:
+
+- **Over length:** the ad is **kept** and the ping warns that, after the edit, it
+  exceeds the channel's limit and must be shortened *or the ad will be removed*
+  (by staff, on review). This is the one difference from a **new** post, where
+  going over length is a hard delete — an in-progress edit gets a warning instead.
+- **Other advisories:** disallowed headers / images / links (per channel type),
+  banned words, and cross-channel duplicates — exactly as on a new post.
+
+Two deliberate differences from the create-time checks:
+
+- **It is *not* gated on a YAGPDB outage.** The failsafe only acts while YAGPDB
+  is down; edit checks run **always**, because YAGPDB can't cover edits even when
+  it's perfectly healthy. That's the whole point of the feature.
+- **Cooldown and duplicate-in-channel are skipped.** Those are *posting-frequency*
+  rules — how recently and how many times someone posted. Editing an ad that's
+  already standing is neither, so applying them would wrongly bounce a legitimate
+  edit (e.g. fixing a typo). Only the content rules apply.
+
+The **member intros** channel gets the same edit treatment: an edit that pushes
+an intro over its 800-character limit is warned (not deleted) with the same
+"fix it or it will be removed" advisory. The one-intro-per-member rule is skipped
+on edits (editing your existing intro isn't a second intro).
+
+Because edits never delete, the only permission it needs is **Add Reactions**
+(the `:staffpending:` flag) plus **Send Messages** in #rule_infractions. The
+`ADVERT_EDIT_CHECKS=false` toggle turns off edit checks for **both** adverts and
+intros; they're otherwise on whenever the matching channels are configured
+(`src/advertConfig.*.js`), independent of `FAILSAFE_ENABLED`. Like the failsafe,
+none of this touches YAGPDB's infraction ledger or advert bans (those live only
+in YAGPDB).
 
 ## Caveats
 

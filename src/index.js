@@ -504,6 +504,7 @@ function buildSettingsMessage(settings) {
       '✅ **Message edits** — always on\n' +
       '✅ **Message deletions** — always on\n' +
       '✅ **Name changes** — always on _(nickname, username & display name)_\n' +
+      '✅ **Joins & leaves** — always on\n' +
       `${settings.log_role_changes ? '🟢' : '⚪'} **Role changes** — ${settings.log_role_changes ? 'On' : 'Off'}`
     )
     .setFooter({ text: 'Only the server owner can change these. Tap a switch below to toggle.' });
@@ -610,6 +611,57 @@ function roleChangeEmbed(member, roleId, roleName, action) {
     .setDescription(sentence)
     .setFooter({ text: `User ID: ${member.id}` })
     .setTimestamp();
+}
+
+// Join/leave embeds, styled after the CircleBot-style card in the reference:
+// @username + avatar author line, a "<@id> has joined/left the server" sentence,
+// an Account Created / Member Count pair, and the user id + timestamp in the
+// footer. `<t:…:f>` renders each viewer's local "June 11, 2018 5:56 PM".
+function memberJoinEmbed(member) {
+  const created = Math.floor(member.user.createdTimestamp / 1000);
+  return new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setAuthor({ name: `@${member.user.username}`, iconURL: member.user.displayAvatarURL() })
+    .setDescription(`<@${member.id}> has joined the server!`)
+    .addFields(
+      { name: 'Account Created', value: `<t:${created}:f>`, inline: true },
+      { name: 'Member Count', value: member.guild.memberCount.toLocaleString(), inline: true }
+    )
+    .setFooter({ text: `User ID: ${member.id}` })
+    .setTimestamp();
+}
+
+// The inverse of the join card (red). memberCount has already been decremented
+// by the time this fires, so it reflects the post-leave total. A partial/uncached
+// member may lack joinedTimestamp and a complete role list, so both are optional.
+function memberLeaveEmbed(member) {
+  const embed = new EmbedBuilder()
+    .setColor(0xe74c3c)
+    .setAuthor({ name: `@${member.user.username}`, iconURL: member.user.displayAvatarURL() })
+    .setDescription(`<@${member.id}> has left the server.`)
+    .setFooter({ text: `User ID: ${member.id}` })
+    .setTimestamp();
+
+  const joined = member.joinedTimestamp
+    ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:f>`
+    : '*(unknown — not cached)*';
+  embed.addFields(
+    { name: 'Joined Server', value: joined, inline: true },
+    { name: 'Member Count', value: member.guild.memberCount.toLocaleString(), inline: true }
+  );
+
+  // Roles held at the time they left (minus @everyone), when the member was
+  // cached. Handy for spotting whether a verified/staff member left.
+  const roles = member.roles?.cache
+    ? [...member.roles.cache.values()]
+        .filter((r) => r.id !== member.guild.id)
+        .sort((a, b) => b.position - a.position)
+        .map((r) => r.name)
+    : [];
+  if (roles.length)
+    embed.addFields({ name: `Roles (${roles.length})`, value: truncate(roles.join(', '), 1024) });
+
+  return embed;
 }
 
 function profileNameEmbed(user, c) {
@@ -812,6 +864,13 @@ client.on('messageCreate', async (message) => {
   } catch (err) {
     console.error('[advert-failsafe] error:', err.message);
   }
+  // Member-intro failsafe: 800-char limit + one-intro-per-member. Self-gates on
+  // YAGPDB being offline and the message being in the configured intros channel.
+  try {
+    await advertFailsafe.handleIntro(message, sendLog);
+  } catch (err) {
+    console.error('[intro-failsafe] error:', err.message);
+  }
   // Onboarding failsafe: age verification in the age channel. Self-gates on
   // YAGPDB being offline and the channel/member matching.
   try {
@@ -822,7 +881,10 @@ client.on('messageCreate', async (message) => {
 });
 
 client.on('messageUpdate', async (_oldMessage, newMessage) => {
-  if (!LOGGING_ENABLED) return;
+  // The edit path serves two features: edit logging (needs LOGGING_ENABLED) and
+  // advert/intro edit-enforcement (independent of logging). Bail early only when
+  // none is active, so a game-only or logging-off bot still stays cheap.
+  if (!LOGGING_ENABLED && !advertFailsafe.editChecksActive && !advertFailsafe.introEditActive) return;
   try {
     if (newMessage.partial) newMessage = await newMessage.fetch();
   } catch {
@@ -833,6 +895,25 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
   // Discord fires messageUpdate for pins, embed loads, flag changes, etc.
   // Real content edits always set editedTimestamp; the rest never do.
   if (!newMessage.editedTimestamp) return;
+
+  // Enforce the advert rules on the *edited* content — YAGPDB (free tier) can't
+  // run commands on edits, so unlike the outage failsafe this always runs. It's
+  // non-destructive (over-length edits are warned, not deleted), so the post
+  // still exists and the edit is logged normally below.
+  try {
+    await advertFailsafe.handleAdvertEdit(newMessage, sendLog);
+  } catch (err) {
+    console.error('[advert-edit] error:', err.message);
+  }
+  // Same for member intros: an edit that pushes the intro over the 800-char limit
+  // is warned (not deleted), which YAGPDB's free tier can't do on edits.
+  try {
+    await advertFailsafe.handleIntroEdit(newMessage, sendLog);
+  } catch (err) {
+    console.error('[intro-edit] error:', err.message);
+  }
+
+  if (!LOGGING_ENABLED) return;
 
   try {
     const stored = await db.getMessage(newMessage.id);
@@ -1102,6 +1183,12 @@ client.on(Events.GuildMemberAdd, async (member) => {
     } catch (err) {
       console.error('[member-add] db error:', err.message);
     }
+    // Post the join card. Separate try so a DB hiccup above never blocks it.
+    try {
+      await sendLog({ embeds: [memberJoinEmbed(member)] });
+    } catch (err) {
+      console.error('[member-add] log error:', err.message);
+    }
   }
   // Assign the Age Please gate role on join (always, so it's applied instantly
   // rather than waiting on YAGPDB — the add is idempotent if YAGPDB assigns too).
@@ -1110,6 +1197,20 @@ client.on(Events.GuildMemberAdd, async (member) => {
     await failsafe.handleMemberJoin(member, sendLog);
   } catch (err) {
     console.error('[member-add] failsafe error:', err.message);
+  }
+});
+
+// Post a leave card when a member departs (leaves, is kicked, or is banned).
+// The member may be partial/uncached — memberLeaveEmbed handles missing
+// joinedTimestamp/roles. Always on (like name changes); sendLog still honours
+// the master log_to_channel switch.
+client.on(Events.GuildMemberRemove, async (member) => {
+  if (!LOGGING_ENABLED) return;
+  if (member.user?.id === client.user.id) return; // ignore our own removal
+  try {
+    await sendLog({ embeds: [memberLeaveEmbed(member)] });
+  } catch (err) {
+    console.error('[member-remove] log error:', err.message);
   }
 });
 
@@ -1254,6 +1355,11 @@ client.once(Events.ClientReady, async () => {
     } else {
       console.log('[failsafe] advert failsafe inactive — no channel IDs set in src/advertConfig.js.');
     }
+    if (advertFailsafe.introConfigured) {
+      console.log('[failsafe] member-intro failsafe armed (800-char limit + one per member).');
+    } else {
+      console.log('[failsafe] member-intro failsafe inactive — no introChannelId set in src/advertConfig.js.');
+    }
     if (onboardingFailsafe.configured) {
       console.log(`[failsafe] onboarding failsafe armed for age channel ${onboardingFailsafe.channelId}.`);
     } else {
@@ -1268,6 +1374,20 @@ client.once(Events.ClientReady, async () => {
     tick.unref?.();
   } else {
     console.log('[failsafe] disabled (FAILSAFE_ENABLED=false); GuildPresences intent not requested.');
+  }
+
+  // Advert edit-enforcement is independent of the failsafe (it fills a gap
+  // YAGPDB can't cover on any tier), so report it separately.
+  if (advertFailsafe.editChecksActive) {
+    console.log(
+      `[advert-edit] armed — advert rules enforced on edits for ${advertFailsafe.channelCount} ` +
+      'channel(s), regardless of YAGPDB status.'
+    );
+  } else {
+    console.log('[advert-edit] inactive — no advert channels configured or ADVERT_EDIT_CHECKS=false.');
+  }
+  if (advertFailsafe.introEditActive) {
+    console.log('[intro-edit] armed — 800-char limit enforced on intro edits, regardless of YAGPDB status.');
   }
 
   // Retention prune: trims the DB archive so storage stays bounded. Advert

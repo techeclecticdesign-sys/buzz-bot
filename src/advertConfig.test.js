@@ -17,4 +17,5 @@ module.exports = require('./advertConfig.base').build({
     '1517648585259356312',
   ],
   infractionsChannelId: '1505355022828048384', // #rule_infractions (test)
+  // introChannelId: '', // set the test server's member-intros channel to enable
 });

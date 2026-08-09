@@ -48,6 +48,11 @@ function build(opts) {
     advertRulesChannelId = '462444993529905172', // live default; override per server
     askTheStaffChannelId = '324571668569915393', // live default; override per server
     staffPendingEmoji = 'staffpending:1442331141771366513', // set null to skip the reaction
+    // Member-introductions channel. Enforced with the YAGPDB "Member Intros"
+    // command's own rules (NOT the advert rules): an 800-character limit and one
+    // intro per member. Unset on a server = intro enforcement stays dormant there.
+    introChannelId, // per-server — #member_introductions
+    introRulesMessageId = '1049103266660765767', // the pinned "member intro rules" post
     // Over-length quick DM points to the matching long-form channel, keyed by
     // the quick channel's NAME (matches the template's .Channel.Name switch).
     // The names are the same on both servers, so this default serves both.
@@ -73,16 +78,26 @@ function build(opts) {
   for (const id of quickChannels) CHANNEL_TYPE.set(id, 'quick');
   const ALL_ADVERT_CHANNELS = [...CHANNEL_TYPE.keys()];
 
+  // Member-intro enforcement config, kept separate from the advert TYPES because
+  // it has its own rules (800-char limit, one per member) and its own DM copy.
+  const INTRO = {
+    channelId: introChannelId || null,
+    maxChars: 800, // YAGPDB's patched member-intro limit (character count)
+    rulesMessageId: introRulesMessageId,
+  };
+
   return {
     SHARED,
     TYPES,
     QUICK_LONGFORM_BY_NAME: quickLongformByName,
     ALL_ADVERT_CHANNELS,
+    INTRO,
     typeForChannel(channelId) {
       const key = CHANNEL_TYPE.get(channelId);
       return key ? TYPES[key] : null;
     },
     configured: ALL_ADVERT_CHANNELS.length > 0,
+    introConfigured: !!INTRO.channelId,
   };
 }
 

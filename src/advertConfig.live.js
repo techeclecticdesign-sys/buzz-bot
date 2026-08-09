@@ -21,4 +21,5 @@ module.exports = require('./advertConfig.base').build({
     '595368989706813444',
   ],
   infractionsChannelId: '641835326314381312', // #rule_infractions (live)
+  introChannelId: '1048992435591729182', // #member_introductions (live)
 });

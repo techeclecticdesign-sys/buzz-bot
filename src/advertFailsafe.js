@@ -15,12 +15,18 @@ const failsafe = require('./failsafe');
 const cfg = require('./advertConfig');
 const checks = require('./advertChecks');
 
-const { SHARED } = cfg;
+const { SHARED, INTRO } = cfg;
 
 // The advert failsafe deletes posts, so require YAGPDB to be offline for a
 // sustained period before acting — this rides out a brief presence blip from a
 // reconnecting YAGPDB. Tunable via ADVERT_MIN_OFFLINE_SECS (default 60s).
 const ADVERT_MIN_OFFLINE_MS = (Number(process.env.ADVERT_MIN_OFFLINE_SECS) || 60) * 1000;
+
+// Edit-time checks are NOT a failsafe: YAGPDB's free tier can't trigger custom
+// commands on message edits at all, so this fills a permanent gap rather than an
+// outage. It therefore runs whether or not YAGPDB is online. Toggle off with
+// ADVERT_EDIT_CHECKS=false.
+const EDIT_CHECKS_ENABLED = process.env.ADVERT_EDIT_CHECKS !== 'false';
 
 function truncate(str, max) {
   if (!str) return str;
@@ -144,8 +150,9 @@ function getChannel(message, id) {
 
 // Delete the post first, then DM the author — but only tell them (and log a
 // removal) if the delete actually succeeded, so a missing-permission failure
-// never leaves the post up while DMing "it wasn't posted".
-async function reject(message, sendLog, name, channelName, dm, tag) {
+// never leaves the post up while DMing "it wasn't posted". `noun` (advert /
+// intro) only tweaks the staff-log wording; the member DM is fully driven by dm.
+async function reject(message, sendLog, name, channelName, dm, tag, noun = 'advert') {
   const embed = rejectEmbed(name, channelName, dm.reason, dm.whatToDo, message.content ?? '');
   const content = message.content ?? '';
   // Mark before deleting so the messageDelete handler suppresses its own embed.
@@ -158,7 +165,7 @@ async function reject(message, sendLog, name, channelName, dm, tag) {
     if (sendLog) {
       await sendLog({
         content:
-          `⚠️ Failsafe could **not** remove <@${message.author.id}>'s ${tag} advert in ` +
+          `⚠️ Failsafe could **not** remove <@${message.author.id}>'s ${tag} ${noun} in ` +
           `<#${message.channelId}> (missing **Manage Messages**?). Post left in place; no DM sent.`,
         allowedMentions: { parse: [] },
       });
@@ -183,7 +190,7 @@ async function reject(message, sendLog, name, channelName, dm, tag) {
       embeds: [
         new EmbedBuilder()
           .setColor(0xe67e22)
-          .setTitle('⚠️ Failsafe: advert removed')
+          .setTitle(`⚠️ Failsafe: ${noun} removed`)
           .setDescription(
             `YAGPDB is offline — removed a post that failed the **${tag}** check.\n\n` +
               `**Member:** <@${message.author.id}> (\`${message.author.username}\`)\n` +
@@ -206,7 +213,14 @@ async function crossChannelDup(message, content) {
   return null;
 }
 
-async function postAdvisory(message, sendLog, issues) {
+// Post the one combined advisory ping. `opts.title` / `opts.headline` set the
+// staff-log wording so the create path (a genuine outage) and the edit path (runs
+// whether or not YAGPDB is online) each read accurately.
+async function postAdvisory(message, sendLog, issues, opts = {}) {
+  const {
+    title = 'Failsafe: advert flagged',
+    headline = `YAGPDB is offline — flagged a kept post to <#${SHARED.infractionsChannelId}>.`,
+  } = opts;
   const body = issues.map((i) => `\n• ${i}`).join('');
   const text = truncate(
     `Hey <@${message.author.id}> ! A few things to fix in your post in <#${message.channelId}>:${body}\n\n` +
@@ -229,9 +243,9 @@ async function postAdvisory(message, sendLog, issues) {
       embeds: [
         new EmbedBuilder()
           .setColor(0xf1c40f)
-          .setTitle('Failsafe: advert flagged')
+          .setTitle(title)
           .setDescription(
-            `YAGPDB is offline — flagged a kept post to <#${SHARED.infractionsChannelId}>.\n\n` +
+            `${headline}\n\n` +
               `**Member:** <@${message.author.id}> (\`${message.author.username}\`)\n` +
               `**Channel:** <#${message.channelId}>\n` +
               `**Issues:** ${issues.length}`
@@ -240,6 +254,72 @@ async function postAdvisory(message, sendLog, issues) {
       ],
     });
   }
+}
+
+// ---- Shared checks, reused by both the create failsafe and the edit trigger ----
+
+// Pure predicate: is the content over this channel's length limit?
+function isOverLength(type, content) {
+  return type.lengthMode === 'words'
+    ? checks.wordCount(content) >= type.maxWords
+    : checks.runeLength(content) > type.maxChars;
+}
+
+// LENGTH as a HARD rule (new posts only): reject the post (delete + DM) if it's
+// over the channel's limit and return true; false if it's within limit.
+async function enforceLength(message, sendLog, type, name, channelName, content, guildId) {
+  if (!isOverLength(type, content)) return false;
+  await reject(message, sendLog, name, channelName, lengthDM(type, message, guildId), 'length');
+  return true;
+}
+
+// LENGTH as an ADVISORY (edits only): rather than delete a post someone is in the
+// middle of editing, keep it and warn — same bullet tone as the other advisories,
+// with the quick channels pointing at their long-form counterpart the way the
+// cross-channel-dup advisory links a channel.
+function lengthAdvisory(type, message) {
+  if (type.lengthMode === 'words') {
+    const lf = cfg.QUICK_LONGFORM_BY_NAME[message.channel?.name];
+    const moveTo = lf ? ` — or move it to <#${lf.id}>` : '';
+    return (
+      'After your edit, this post is over the 100 word limit for the quick search channels. ' +
+      `Please shorten it to 100 words or fewer${moveTo}, or your ad will be removed.`
+    );
+  }
+  return (
+    'After your edit, this post is over the 2,000 character limit for this channel. ' +
+    'Please shorten it to 2,000 characters or less, or your ad will be removed.'
+  );
+}
+
+// ADVISORY checks (post is kept). Collects every advisory hit — headers / images
+// / links (per channel type), banned words, cross-channel duplicate — into one
+// combined ping. `leadIssues` are prepended (the edit path uses this for the
+// over-length warning) so everything lands in a single ping. All content rules,
+// so they apply on a new post and on an edit alike. Returns the issue count.
+async function runAdvisories(message, sendLog, type, content, leadIssues = [], advisoryOpts = {}) {
+  const issues = [...leadIssues];
+  if (type.rules.headers === 'group') {
+    if (checks.groupHeaderIssue(content)) issues.push(GROUP_HEADER_MSG);
+  } else if (type.rules.headers === 'none') {
+    if (checks.hasAnyHeader(content)) issues.push(HEADER_NONE_MSG[type.name]);
+  }
+  if (type.rules.images && message.attachments.size > 0) issues.push(IMAGE_MSG[type.name]);
+  if (type.rules.links && checks.linkPresent(content)) issues.push(LINK_MSG);
+
+  const bh = checks.bannedHits(content, SHARED.banned);
+  if (bh.length) issues.push(`It contains wording that isn't allowed here: ${bh.join(' ')}`);
+
+  const dupChannelId = await crossChannelDup(message, content);
+  if (dupChannelId) {
+    issues.push(
+      `It looks identical to your ad in <#${dupChannelId}>. Cross-channel adverts must be distinctly different ` +
+        'from each other and searching for different things. Please choose a channel for your advert.'
+    );
+  }
+
+  if (issues.length) await postAdvisory(message, sendLog, issues, advisoryOpts);
+  return issues.length;
 }
 
 // Entry point, called from messageCreate for every message. Cheap early-outs
@@ -259,14 +339,7 @@ async function handleAdvert(message, sendLog) {
   const content = message.content ?? '';
 
   // ---- 1. LENGTH ----
-  const overLength =
-    type.lengthMode === 'words'
-      ? checks.wordCount(content) >= type.maxWords
-      : checks.runeLength(content) > type.maxChars;
-  if (overLength) {
-    await reject(message, sendLog, name, channelName, lengthDM(type, message, guildId), 'length');
-    return;
-  }
+  if (await enforceLength(message, sendLog, type, name, channelName, content, guildId)) return;
 
   // ---- 2 & 3. COOLDOWN + DUPLICATE-IN-CHANNEL ----
   const lockoutMs = type.lockoutHours * 3600000;
@@ -293,32 +366,124 @@ async function handleAdvert(message, sendLog) {
   }
 
   // ---- POST IS KEPT — advisory checks (collect into one ping) ----
-  const issues = [];
-  if (type.rules.headers === 'group') {
-    if (checks.groupHeaderIssue(content)) issues.push(GROUP_HEADER_MSG);
-  } else if (type.rules.headers === 'none') {
-    if (checks.hasAnyHeader(content)) issues.push(HEADER_NONE_MSG[type.name]);
+  await runAdvisories(message, sendLog, type, content);
+}
+
+// Entry point for message *edits*, called from messageUpdate. YAGPDB's free tier
+// can't run custom commands on edits, so this isn't gated on a YAGPDB outage the
+// way handleAdvert is — it always enforces, closing a hole where a member could
+// post a clean ad and then edit in something that breaks the rules.
+//
+// Edits are NON-DESTRUCTIVE: unlike a new post, an over-length edit isn't
+// deleted — deleting a post out from under someone mid-edit is too harsh. Length
+// instead becomes an advisory that rides along in the same combined ping, warning
+// the author to fix it or the ad will be removed (by staff, on review). Cooldown
+// and duplicate-in-channel are skipped entirely: they're about how often / how
+// many times someone *posts*, which editing an existing post isn't.
+async function handleAdvertEdit(message, sendLog) {
+  if (!EDIT_CHECKS_ENABLED || !cfg.configured) return;
+  if (!message.guild || message.author.bot || message.system) return;
+  const type = cfg.typeForChannel(message.channelId);
+  if (!type) return; // not a configured advert channel
+
+  const content = message.content ?? '';
+  const lead = isOverLength(type, content) ? [lengthAdvisory(type, message)] : [];
+  await runAdvisories(message, sendLog, type, content, lead, {
+    title: 'Advert edit flagged',
+    headline: `Flagged an edited advert to <#${SHARED.infractionsChannelId}>.`,
+  });
+}
+
+// ---- Member introductions ----------------------------------------------------
+// A direct port of YAGPDB's "Member Intros" custom command (NOT the advert
+// rules): an 800-character limit and one intro per member, both hard (delete +
+// DM), reusing the same reject/DM plumbing. Dormant unless introChannelId is set.
+
+// The "[member intro rules]" link the DM points at — the pinned rules post inside
+// the intros channel, exactly as the YAGPDB command builds it.
+const introRuleLink = (guildId) =>
+  `[member intro rules](${channelLink(guildId, INTRO.channelId)}/${INTRO.rulesMessageId})`;
+const introContact =
+  'Please feel free to reach out to a member of the RPC moderation team if you have any further questions.';
+
+const introLengthDM = (guildId) => ({
+  reason: 'it exceeds the 800-character limit for the member intros channel',
+  whatToDo:
+    '**Please shorten your post to fit within the 800-character limit.\n\n' +
+    `For additional information about posting member intros, please see our ${introRuleLink(guildId)}. ` +
+    introContact +
+    '**',
+});
+
+const introDuplicateDM = (guildId, oldMsgId) => ({
+  reason: 'you already have a member intro in this channel',
+  whatToDo:
+    '**If you are posting a new member intro, go ahead and delete your ' +
+    `[old intro](${channelLink(guildId, INTRO.channelId)}/${oldMsgId}).\n\n` +
+    `For additional information about posting member intros, please see our ${introRuleLink(guildId)}. ` +
+    introContact +
+    '**',
+});
+
+// Edit-only advisory (non-destructive), mirroring the advert edit exception: an
+// over-length *edit* is warned rather than deleted.
+const introLengthAdvisory = () =>
+  'After your edit, this intro is over the 800 character limit for the member intros channel. ' +
+  'Please shorten it to 800 characters or less, or your intro will be removed.';
+
+// New-post enforcement while YAGPDB is offline — mirrors handleAdvert's gating.
+async function handleIntro(message, sendLog) {
+  if (!failsafe.ENABLED || !cfg.introConfigured) return;
+  if (!message.guild || message.author.bot || message.system) return;
+  if (message.channelId !== INTRO.channelId) return;
+  if (failsafe.isYagpdbOnline(message.guild)) return; // YAGPDB up → stay dormant
+  if (failsafe.offlineForMs(message.guild) < ADVERT_MIN_OFFLINE_MS) return; // sustained-outage guard
+
+  const guildId = message.guildId;
+  const name = message.member?.nickname ?? message.author.username;
+  const channelName = message.channel?.name ?? 'this channel';
+  const content = message.content ?? '';
+
+  // ---- LENGTH (hard, > 800 chars) ----
+  if (checks.runeLength(content) > INTRO.maxChars) {
+    await reject(message, sendLog, name, channelName, introLengthDM(guildId), 'length', 'intro');
+    return;
   }
-  if (type.rules.images && message.attachments.size > 0) issues.push(IMAGE_MSG[type.name]);
-  if (type.rules.links && checks.linkPresent(content)) issues.push(LINK_MSG);
-
-  const bh = checks.bannedHits(content, SHARED.banned);
-  if (bh.length) issues.push(`It contains wording that isn't allowed here: ${bh.join(' ')}`);
-
-  const dupChannelId = await crossChannelDup(message, content);
-  if (dupChannelId) {
-    issues.push(
-      `It looks identical to your ad in <#${dupChannelId}>. Cross-channel adverts must be distinctly different ` +
-        'from each other and searching for different things. Please choose a channel for your advert.'
-    );
+  // ---- ONE INTRO PER MEMBER (hard) ----
+  const standing = await db.getStandingAdvert(message.channelId, message.author.id, message.id);
+  if (standing) {
+    await reject(message, sendLog, name, channelName, introDuplicateDM(guildId, standing.id), 'duplicate', 'intro');
   }
+}
 
-  if (issues.length) await postAdvisory(message, sendLog, issues);
+// Edit enforcement — always on (YAGPDB can't run on edits), non-destructive.
+// Over-length becomes an advisory; the one-per-member rule is skipped (editing an
+// existing intro isn't a second intro).
+async function handleIntroEdit(message, sendLog) {
+  if (!EDIT_CHECKS_ENABLED || !cfg.introConfigured) return;
+  if (!message.guild || message.author.bot || message.system) return;
+  if (message.channelId !== INTRO.channelId) return;
+
+  const content = message.content ?? '';
+  if (checks.runeLength(content) > INTRO.maxChars) {
+    await postAdvisory(message, sendLog, [introLengthAdvisory()], {
+      title: 'Intro edit flagged',
+      headline: `Flagged an edited intro to <#${SHARED.infractionsChannelId}>.`,
+    });
+  }
 }
 
 module.exports = {
   handleAdvert,
+  handleAdvertEdit,
   consumeSuppressedDelete,
+  handleIntro,
+  handleIntroEdit,
   configured: cfg.configured,
+  introConfigured: cfg.introConfigured,
+  // True when edit-time enforcement is both switched on and has channels to act
+  // on — lets index.js keep the messageUpdate fast-path when nothing needs it.
+  editChecksActive: EDIT_CHECKS_ENABLED && cfg.configured,
+  introEditActive: EDIT_CHECKS_ENABLED && cfg.introConfigured,
   channelCount: cfg.ALL_ADVERT_CHANNELS.length,
 };
