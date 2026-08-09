@@ -134,6 +134,29 @@ async function toggleVote(pollId, userId, choiceIndex) {
       [pollId, userId]
     );
     const current = existingRes.rows.map((row) => row.choice_index);
+
+    // Single-vote polls: a tap SETS or MOVES the one vote. It never silently
+    // removes it, so a stray double-tap can't leave the voter with no vote.
+    if (poll.votes_allowed === 1) {
+      if (current.includes(choiceIndex)) {
+        await client.query('ROLLBACK');
+        return { status: 'unchanged', poll, votes: [choiceIndex] };
+      }
+      const moved = current.length > 0;
+      if (moved) {
+        await client.query('DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2', [pollId, userId]);
+      }
+      await client.query(
+        `INSERT INTO poll_votes (poll_id, user_id, choice_index)
+         VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING`,
+        [pollId, userId, choiceIndex]
+      );
+      await client.query('COMMIT');
+      return { status: moved ? 'moved' : 'added', poll, votes: [choiceIndex] };
+    }
+
+    // Multi-vote polls: tapping a choice toggles it on or off.
     if (current.includes(choiceIndex)) {
       await client.query(
         'DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2 AND choice_index = $3',

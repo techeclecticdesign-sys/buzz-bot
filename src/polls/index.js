@@ -323,12 +323,32 @@ async function cmdClosePoll(interaction) {
   await interaction.editReply(`Closed poll **${poll.poll_id}** and posted the final result on the poll message.`);
 }
 
-function voteStatusText(status, poll, votes) {
-  const selected = votes.map((i) => `${choiceEmoji(i)} ${poll.choices[i]}`).join(', ') || 'none';
-  if (status === 'limit') {
-    return `You already used all ${poll.votes_allowed} vote(s). Tap one of your current choices to remove it first: ${selected}`;
+function choiceLabel(poll, i) {
+  return `${choiceEmoji(i)} ${poll.choices[i]}`;
+}
+
+function voteStatusText(result, choiceIndex) {
+  const { status, poll, votes } = result;
+  const used = `${votes.length} of ${poll.votes_allowed} vote(s) used`;
+  switch (status) {
+    case 'added':
+      if (poll.votes_allowed === 1) return `:white_check_mark: Your vote: ${choiceLabel(poll, choiceIndex)}`;
+      return `:white_check_mark: Added ${choiceLabel(poll, choiceIndex)} — ${used}.`;
+    case 'moved':
+      return `:arrows_counterclockwise: Vote changed to ${choiceLabel(poll, choiceIndex)}`;
+    case 'unchanged':
+      return `:white_check_mark: Your vote is still ${choiceLabel(poll, choiceIndex)}`;
+    case 'removed': {
+      const remaining = votes.map((i) => choiceLabel(poll, i)).join(', ') || 'none';
+      return `:leftwards_arrow_with_hook: Removed ${choiceLabel(poll, choiceIndex)} — ${used}. Current: ${remaining}`;
+    }
+    case 'limit': {
+      const selected = votes.map((i) => choiceLabel(poll, i)).join(', ') || 'none';
+      return `You already used all ${poll.votes_allowed} vote(s). Tap one of your current choices to remove it first: ${selected}`;
+    }
+    default:
+      return 'That vote could not be recorded.';
   }
-  return 'That vote could not be recorded.';
 }
 
 async function onVote(interaction) {
@@ -353,13 +373,9 @@ async function onVote(interaction) {
     await interaction.reply({ content: 'That choice is not part of this poll.', flags: EPHEMERAL });
     return;
   }
-  if (result.status === 'added' || result.status === 'removed') {
-    await interaction.deferUpdate();
-    return;
-  }
 
   await interaction.reply({
-    content: voteStatusText(result.status, result.poll, result.votes),
+    content: voteStatusText(result, choiceIndex),
     flags: EPHEMERAL,
   });
 }
