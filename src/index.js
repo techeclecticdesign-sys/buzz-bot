@@ -204,12 +204,15 @@ function shouldTrack(message) {
 const PREFIX = 'c!';
 const NICK_PREFIX = '>>';
 
+function envIds(name) {
+  return (process.env[name] || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
 // Roles allowed to run `c!threadkill`.
-const THREADKILL_STAFF_ROLES = [
-  '300831005621878784',
-  '322845008409395200',
-  '479484736188973087',
-];
+const MOD_ROLES = envIds('MOD_ROLES');
 const MEMBER_LIST_CAP = 200;
 
 // Advert channels whose posts' reactions we keep mirrored for rpc-web. Empty
@@ -344,7 +347,7 @@ async function sendServerInfoCard(message) {
 // channel is deleted solely when `isThread()` is true, so regular channels are
 // never touched, and a message id (which resolves to no channel) is a no-op.
 async function handleThreadkillCommand(message, args) {
-  const isStaff = message.member?.roles.cache.hasAny(...THREADKILL_STAFF_ROLES);
+  const isStaff = MOD_ROLES.length > 0 && message.member?.roles.cache.hasAny(...MOD_ROLES);
   if (!isStaff) {
     await message.reply('You do not have permission to use this command.');
     return;

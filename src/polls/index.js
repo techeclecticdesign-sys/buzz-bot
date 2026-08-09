@@ -11,13 +11,10 @@ const db = require('./db');
 
 const ENABLED = process.env.POLLS_ENABLED !== 'false';
 // Only these staff roles may create polls. Everyone can still vote.
-const POLL_STAFF_ROLES = [
-  '300831005621878784',
-  '322845008409395200',
-  '479484736188973087',
-  '1371346095380238376',
-  '1376679985603022899',
-];
+const STAFF_ROLES = (process.env.STAFF_ROLES || '')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
 const EPHEMERAL = MessageFlags.Ephemeral;
 const MAX_CHOICES = 20;
 const MAX_QUESTION_LENGTH = 1000;
@@ -235,7 +232,7 @@ function collectChoices(interaction) {
 }
 
 function canCreatePoll(interaction) {
-  return interaction.member?.roles?.cache?.hasAny(...POLL_STAFF_ROLES) ?? false;
+  return STAFF_ROLES.length > 0 && (interaction.member?.roles?.cache?.hasAny(...STAFF_ROLES) ?? false);
 }
 
 async function cmdPoll(interaction) {

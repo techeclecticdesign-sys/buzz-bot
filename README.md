@@ -30,7 +30,7 @@ after two) so a free database can keep up — see [Database retention](#database
 - **Anonymous polls:** `/poll` creates a timed poll with 2-20 choices and a
   fixed number of votes per person. Voters use private button interactions, so
   the public message only shows choices until `/closepoll` or the timer posts
-  the final EasyPoll-style result bar.
+  the final EasyPoll-style result bar. Creation is limited to `STAFF_ROLES`.
 - **Member history:** every nickname and role change is also recorded permanently
   to the database (regardless of the role-logging toggle). Query it with:
   - **`>>nicknames @user`** — the user's nickname history (also accepts a user id
