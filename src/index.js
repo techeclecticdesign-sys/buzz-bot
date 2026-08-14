@@ -19,9 +19,11 @@ const failsafe = require('./failsafe');
 const advertFailsafe = require('./advertFailsafe');
 const onboardingFailsafe = require('./onboardingFailsafe');
 const advertConfig = require('./advertConfig');
+const advertImages = require('./advertImages');
 const { reactionSummary } = require('./reactions');
 const retention = require('./retention');
 const linkCheck = require('./checkLinks');
+const memberStats = require('./memberStatsCollector');
 const game = require('./game');
 const polls = require('./polls');
 
@@ -843,6 +845,35 @@ async function handleNickPrefixCommand(message) {
   }
 }
 
+// Persist (or refresh) the stored image attachments for a GROUP advert post so
+// the browse site can show them. No-ops for non-group channels. Best-effort:
+// download/storage failures are logged, never thrown into the event handler.
+async function syncAdvertImages(message) {
+  if (!advertImages.isGroupChannel(message.channelId)) return;
+  try {
+    const descriptors = advertImages.fromDiscordMessage(message);
+    if (descriptors.length === 0) {
+      await db.clearAdvertAttachments(message.id);
+      return;
+    }
+    const images = await advertImages.downloadImages(descriptors);
+    await db.setAdvertAttachments(message.id, message.channelId, images);
+  } catch (err) {
+    console.error('[advert-images] sync error:', err.message);
+  }
+}
+
+// On an edit, re-capture group-ad images only when the image set actually
+// changed versus what's already stored (`stored.attachments` metadata). Handles
+// the attachment-only edit — e.g. removing an image without touching the text —
+// which the content-changed guard alone would miss.
+async function reconcileAdvertImages(message, stored) {
+  if (!advertImages.isGroupChannel(message.channelId)) return;
+  const current = advertImages.imageSignature(advertImages.fromDiscordMessage(message));
+  const previous = advertImages.imageSignature(stored?.attachments);
+  if (current !== previous) await syncAdvertImages(message);
+}
+
 client.on('messageCreate', async (message) => {
   if (message.guildId && !message.author.bot) {
     if (message.content.startsWith(PREFIX)) await handleCommand(message);
@@ -852,6 +883,9 @@ client.on('messageCreate', async (message) => {
   if (LOGGING_ENABLED) {
     try {
       await db.upsertMessage(message);
+      // Group-ad images are captured after the row exists (setAdvertAttachments
+      // updates it). Own try/catch inside, so it never masks the insert error.
+      await syncAdvertImages(message);
     } catch (err) {
       console.error('[create] db error:', err.message);
     }
@@ -896,31 +930,54 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
   // Real content edits always set editedTimestamp; the rest never do.
   if (!newMessage.editedTimestamp) return;
 
-  // Enforce the advert rules on the *edited* content — YAGPDB (free tier) can't
-  // run commands on edits, so unlike the outage failsafe this always runs. It's
-  // non-destructive (over-length edits are warned, not deleted), so the post
-  // still exists and the edit is logged normally below.
+  // Look up the archived (pre-edit) content once: it drives both the
+  // content-changed guard here and the before/after edit log further down.
+  // editedTimestamp stays set forever once a message has been edited, so Discord
+  // keeps re-firing messageUpdate on it for embed unfurls, pins and flag changes
+  // — none of which touch the text. Without this guard the advert/intro
+  // edit-enforcement would re-flag the same violation on every re-fire (the
+  // "infracted twice more" bug). The archive is updated at the end of this
+  // handler, so a genuine edit differs here while a re-fire matches.
+  let stored;
   try {
-    await advertFailsafe.handleAdvertEdit(newMessage, sendLog);
+    stored = await db.getMessage(newMessage.id);
   } catch (err) {
-    console.error('[advert-edit] error:', err.message);
+    console.error('[update] archive lookup error:', err.message);
   }
-  // Same for member intros: an edit that pushes the intro over the 800-char limit
-  // is warned (not deleted), which YAGPDB's free tier can't do on edits.
-  try {
-    await advertFailsafe.handleIntroEdit(newMessage, sendLog);
-  } catch (err) {
-    console.error('[intro-edit] error:', err.message);
+  const oldContent = stored?.content ?? null;
+  const contentUnchanged = oldContent !== null && oldContent === newMessage.content;
+
+  // Enforce the advert rules on *genuinely edited* content — YAGPDB (free tier)
+  // can't run commands on edits, so unlike the outage failsafe this always runs.
+  // It's non-destructive (over-length edits are warned, not deleted), so the
+  // post still exists and the edit is logged normally below. Skipped on re-fires
+  // that carry no text change so we never double-flag the same edit.
+  if (!contentUnchanged) {
+    try {
+      await advertFailsafe.handleAdvertEdit(newMessage, sendLog);
+    } catch (err) {
+      console.error('[advert-edit] error:', err.message);
+    }
+    // Same for member intros: an edit that pushes the intro over the 800-char
+    // limit is warned (not deleted), which YAGPDB's free tier can't do on edits.
+    try {
+      await advertFailsafe.handleIntroEdit(newMessage, sendLog);
+    } catch (err) {
+      console.error('[intro-edit] error:', err.message);
+    }
   }
 
   if (!LOGGING_ENABLED) return;
 
   try {
-    const stored = await db.getMessage(newMessage.id);
-    const oldContent = stored?.content ?? null;
-
-    // Already logged this edit (e.g. a later embed-load event re-fired update).
-    if (oldContent !== null && oldContent === newMessage.content) return;
+    // Already logged this edit (e.g. a later embed-load event re-fired update),
+    // or an attachment-only edit that left the text unchanged. Skip the edit
+    // log, but still reconcile group-ad images — an image may have been added or
+    // removed with no text change (a no-op when the image set is untouched).
+    if (contentUnchanged) {
+      await reconcileAdvertImages(newMessage, stored);
+      return;
+    }
 
     const beforeText = oldContent !== null
       ? (oldContent || '*(no text content)*')
@@ -960,6 +1017,9 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
     } else {
       await db.upsertMessage(newMessage);
     }
+    // Reconcile group-ad images (row now exists for the FK). Only re-downloads
+    // when the image set changed, so a pure text edit doesn't refetch bytes.
+    await reconcileAdvertImages(newMessage, stored);
   } catch (err) {
     console.error('[update] error:', err.message);
   }
@@ -1050,6 +1110,10 @@ client.on('messageDelete', async (message) => {
       at: new Date().toISOString(),
     });
     if (stored) await db.markDeleted(message.id);
+    // Reclaim any stored group-ad image bytes for the removed post.
+    if (advertImages.isGroupChannel(message.channelId)) {
+      await db.clearAdvertAttachments(message.id);
+    }
   } catch (err) {
     console.error('[delete] error:', err.message);
   }
@@ -1113,6 +1177,9 @@ client.on('messageDeleteBulk', async (messages) => {
       });
     }
     await db.markDeleted(ids);
+    if (advertImages.isGroupChannel(channelId)) {
+      await Promise.all(ids.map((id) => db.clearAdvertAttachments(id)));
+    }
   } catch (err) {
     console.error('[bulk-delete] error:', err.message);
   }
@@ -1408,6 +1475,30 @@ client.once(Events.ClientReady, async () => {
   // `npm start` and offer no cron). Dormant unless LINK_CHECK_CHANNELS is set;
   // `npm run check-links` still runs it manually on demand.
   linkCheck.scheduleLinkCheck(client);
+
+  // Member-growth stats: incrementally scan #guestbook + the member-count channel
+  // so member_events / member_count_samples stay current for rpc-web's stats page,
+  // replacing the manual `npm run member-stats`. Catches up on boot, then runs
+  // just after each UTC midnight (when the chart rolls the prior day to a finished
+  // bar). Needs the message intents to read join/leave history and count embeds.
+  if (memberStats.ENABLED && needMessageIntents) {
+    memberStats.schedule(client, db.pool);
+    console.log(
+      `[member-stats] armed — catch-up on boot, then daily ~${memberStats.midnightOffsetMin} min after UTC midnight.`
+    );
+  } else if (memberStats.ENABLED) {
+    console.log(
+      '[member-stats] inactive — message intents not enabled (LOGGING_ENABLED=false and failsafe off).'
+    );
+  } else {
+    console.log('[member-stats] disabled (MEMBER_STATS_ENABLED=false).');
+  }
+
+  // Infraction re-check (auto-approval): re-tests flagged adverts/intros on a
+  // schedule and clears :staffpending: / marks the ping :staffapproved: once
+  // fixed, or removes a still-broken post at the terminal stage. Persisted in the
+  // DB, so it resumes any in-flight re-checks across restarts.
+  advertFailsafe.scheduleRechecks(client, sendLog);
 });
 
 client.on('error', (err) => console.error('[client] error:', err.message));

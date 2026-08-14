@@ -48,6 +48,11 @@ function build(opts) {
     advertRulesChannelId = '462444993529905172', // live default; override per server
     askTheStaffChannelId = '324571668569915393', // live default; override per server
     staffPendingEmoji = 'staffpending:1442331141771366513', // set null to skip the reaction
+    // Added to the #rule_infractions ping (and the offending post's flag is
+    // cleared) once the infraction re-check finds the post fixed — the same
+    // "auto-approve" YAGPDB's infraction_recheck does. Same emoji id as YAGPDB's
+    // (one shared server). Set null to skip the approval reaction.
+    staffApprovedEmoji = 'staffapproved:1358879847664975902',
     // Member-introductions channel. Enforced with the YAGPDB "Member Intros"
     // command's own rules (NOT the advert rules): an 800-character limit and one
     // intro per member. Unset on a server = intro enforcement stays dormant there.
@@ -67,6 +72,7 @@ function build(opts) {
     advertRulesChannelId,
     askTheStaffChannelId,
     staffPendingEmoji,
+    staffApprovedEmoji,
     graceSecs: 600, // 10-min delete-and-repost grace window
     banned: BANNED,
     embed: EMBED,

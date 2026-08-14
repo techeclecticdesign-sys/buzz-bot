@@ -28,6 +28,26 @@ const ADVERT_MIN_OFFLINE_MS = (Number(process.env.ADVERT_MIN_OFFLINE_SECS) || 60
 // ADVERT_EDIT_CHECKS=false.
 const EDIT_CHECKS_ENABLED = process.env.ADVERT_EDIT_CHECKS !== 'false';
 
+// Infraction re-check (auto-approval) — logger-bot's port of YAGPDB's
+// infraction_recheck. After we post an advisory, a poll loop re-tests the post
+// on a schedule: the first time it comes back clean the :staffpending: flag is
+// removed from the post and the #rule_infractions ping is marked :staffapproved:;
+// a post still broken at the terminal stage is removed and its ping approved to
+// close it out. Applies to whatever we flagged, so it covers BOTH the edit path
+// and the offline failsafe. Toggle off with INFRACTION_RECHECK=false; keep the
+// post (approve + close without deleting) at the terminal stage with
+// INFRACTION_RECHECK_DELETE=false.
+const RECHECK_ENABLED = process.env.INFRACTION_RECHECK !== 'false';
+const RECHECK_DELETE = process.env.INFRACTION_RECHECK_DELETE !== 'false';
+// Stage times, mirroring YAGPDB: first re-check 10m after the ping, then 45m,
+// 90m, and 480m (~8h). Stored as the delay (minutes) FROM the previous stage —
+// [0] is the initial arm, [1..] each escalate a still-dirty post; once past the
+// last entry the post is at the terminal stage (removed / closed). Hardcoded on
+// purpose: this drives a destructive auto-delete, so the timing is not something
+// an env var should be able to compress.
+const RECHECK_STAGE_DELAYS_MIN = [10, 35, 45, 390]; // → 10, 45, 90, 480 absolute
+const RECHECK_POLL_MS = Math.max(30, Number(process.env.INFRACTION_RECHECK_POLL_SECS) || 60) * 1000;
+
 function truncate(str, max) {
   if (!str) return str;
   return str.length > max ? str.slice(0, max - 1) + '…' : str;
@@ -54,7 +74,8 @@ const IMAGE_MSG = {
   quick: "Images and other media aren't allowed in the quick search channels. Please remove any attachments.",
 };
 const GROUP_HEADER_MSG =
-  'Group adverts may only have **one** line of header text. Use regular **bold** for any additional lines.';
+  'Group adverts may only have **one** line of header text (including extra lines from wrapping if the text ' +
+  'is too long). Use regular **bold** for any additional lines.';
 const LINK_MSG = "Links aren't allowed in the quick search channels. Please remove it from your ad.";
 
 function humanizeMinutes(ms) {
@@ -207,16 +228,28 @@ async function postAdvisory(message, sendLog, issues, opts = {}) {
   const {
     title = 'Failsafe: advert flagged',
     headline = `YAGPDB is offline — flagged a kept post to <#${SHARED.infractionsChannelId}>.`,
+    lengthNote = false,
+    edited = false,
   } = opts;
   const body = issues.map((i) => `\n• ${i}`).join('');
+  // The emoji/character-count note only makes sense next to a length advisory
+  // (which only edits produce — a new post over the limit is deleted, not
+  // pinged). Appending it to header/image/link advisories was just noise.
+  const note = lengthNote
+    ? '\n\nNote: we count character length the same way Discord does, so custom emoji can easily be ' +
+      'more than 30 characters apiece even though they show as one.'
+    : '';
+  // On the edit path, name it an "edited post" so the member (and staff) can tell
+  // this fired on a later edit, not the original post YAGPDB already flagged.
+  const subject = edited ? 'edited post' : 'post';
   const text = truncate(
-    `Hey <@${message.author.id}> ! A few things to fix in your post in <#${message.channelId}>:${body}\n\n` +
-      'Please edit your post. Thanks!',
+    `Hey <@${message.author.id}> ! A few things to fix in your ${subject} in <#${message.channelId}>:${body}${note}`,
     2000
   );
   const channel = await getChannel(message, SHARED.infractionsChannelId);
+  let sent = null;
   if (channel) {
-    await channel.send({ content: text, allowedMentions: { users: [message.author.id] } });
+    sent = await channel.send({ content: text, allowedMentions: { users: [message.author.id] } });
   }
   if (SHARED.staffPendingEmoji) {
     try {
@@ -227,6 +260,34 @@ async function postAdvisory(message, sendLog, issues, opts = {}) {
   }
   // No general-log echo: the advisory already lives in #rule_infractions and the
   // :staffpending: flag sits on the post. Infractions do not go to general logs.
+  // The sent message is returned so the edit path can "bump" it on a re-edit.
+  return sent;
+}
+
+// Called after an advisory is posted (edit path or offline failsafe). Two jobs,
+// both keyed to the offending post so there's exactly one live advisory per post:
+//   • BUMP — if a prior advisory is remembered for this post, delete it now that a
+//     fresh one exists, so #rule_infractions shows one current ping, not a stack.
+//   • ARM the re-check — record the new advisory id + the post's channel and set
+//     the first re-check ~10m out, restarting the clock (a fresh edit gets a fresh
+//     window). The poll loop takes it from there.
+// `posted` is the just-sent advisory (null when nothing tripped → no-op).
+async function recordAdvisory(message, posted) {
+  if (!posted) return;
+  try {
+    const prev = await db.getAdvertInfraction(message.id);
+    if (prev?.advisory_id && prev.advisory_id !== posted.id) {
+      const channel = await getChannel(message, SHARED.infractionsChannelId);
+      const old = channel ? await channel.messages.fetch(prev.advisory_id).catch(() => null) : null;
+      if (old) await old.delete().catch(() => {});
+    }
+    const nextCheckAt = RECHECK_ENABLED
+      ? new Date(Date.now() + RECHECK_STAGE_DELAYS_MIN[0] * 60000)
+      : null;
+    await db.setAdvertInfraction(message.id, posted.id, message.channelId, nextCheckAt);
+  } catch (err) {
+    console.error(`[advert-recheck] record failed for ${message.id}: ${err.message}`);
+  }
 }
 
 // ---- Shared checks, reused by both the create failsafe and the edit trigger ----
@@ -265,13 +326,13 @@ function lengthAdvisory(type, message) {
   );
 }
 
-// ADVISORY checks (post is kept). Collects every advisory hit — headers / images
-// / links (per channel type), banned words, cross-channel duplicate — into one
-// combined ping. `leadIssues` are prepended (the edit path uses this for the
-// over-length warning) so everything lands in a single ping. All content rules,
-// so they apply on a new post and on an edit alike. Returns the issue count.
-async function runAdvisories(message, sendLog, type, content, leadIssues = [], advisoryOpts = {}) {
-  const issues = [...leadIssues];
+// Collect every ADVISORY hit (post is kept) — headers / images / links (per
+// channel type), banned words, cross-channel duplicate — as human-readable
+// bullet strings. NOT length: that's the create-path hard rule / the edit-path
+// lead. Shared by the advisory ping (runAdvisories) and the re-check's dirtiness
+// test (isPostDirty), so "what counts as a violation" is defined once.
+async function collectIssues(message, type, content) {
+  const issues = [];
   if (type.rules.headers === 'group') {
     if (checks.groupHeaderIssue(content)) issues.push(GROUP_HEADER_MSG);
   } else if (type.rules.headers === 'none') {
@@ -290,9 +351,35 @@ async function runAdvisories(message, sendLog, type, content, leadIssues = [], a
         'from each other and searching for different things. Please choose a channel for your advert.'
     );
   }
+  return issues;
+}
 
-  if (issues.length) await postAdvisory(message, sendLog, issues, advisoryOpts);
-  return issues.length;
+// Collect + post the one combined advisory. `leadIssues` are prepended (the edit
+// path uses this for the over-length warning) so everything lands in a single
+// ping. Returns the posted advisory message (so callers can bump / arm the
+// re-check), or null when nothing tripped.
+async function runAdvisories(message, sendLog, type, content, leadIssues = [], advisoryOpts = {}) {
+  const issues = [...leadIssues, ...(await collectIssues(message, type, content))];
+  if (!issues.length) return null;
+  return postAdvisory(message, sendLog, issues, advisoryOpts);
+}
+
+// Is this post still in violation? The re-check's "dirty" test — same ruleset the
+// advisory uses (length + every collectIssues hit), so :staffpending: only clears
+// once the post passes the FULL set, not just the rule that first flagged it.
+// Resolves the channel type itself; intros (not an advert type) fall back to
+// their own 800-char rule. An unknown channel is treated as clean (nothing to do).
+async function isPostDirty(message) {
+  const content = message.content ?? '';
+  const type = cfg.typeForChannel(message.channelId);
+  if (type) {
+    if (isOverLength(type, content)) return true;
+    return (await collectIssues(message, type, content)).length > 0;
+  }
+  if (cfg.introConfigured && message.channelId === INTRO.channelId) {
+    return checks.runeLength(content) > INTRO.maxChars;
+  }
+  return false;
 }
 
 // Entry point, called from messageCreate for every message. Cheap early-outs
@@ -339,7 +426,8 @@ async function handleAdvert(message, sendLog) {
   }
 
   // ---- POST IS KEPT — advisory checks (collect into one ping) ----
-  await runAdvisories(message, sendLog, type, content);
+  const posted = await runAdvisories(message, sendLog, type, content);
+  await recordAdvisory(message, posted); // arm the auto-approval re-check
 }
 
 // Entry point for message *edits*, called from messageUpdate. YAGPDB's free tier
@@ -359,12 +447,20 @@ async function handleAdvertEdit(message, sendLog) {
   const type = cfg.typeForChannel(message.channelId);
   if (!type) return; // not a configured advert channel
 
+  // Re-run every content rule on the edited post: YAGPDB (free tier) can't run on
+  // edits at all, so this is the only thing enforcing them after an edit. Over-
+  // length rides along as an advisory lead (non-destructive — warn, don't delete
+  // a post someone is mid-edit on). recordAdvisory below keeps this to one live
+  // advisory per post no matter how many times they edit, and arms the re-check.
   const content = message.content ?? '';
   const lead = isOverLength(type, content) ? [lengthAdvisory(type, message)] : [];
-  await runAdvisories(message, sendLog, type, content, lead, {
+  const posted = await runAdvisories(message, sendLog, type, content, lead, {
+    edited: true,
+    lengthNote: lead.length > 0,
     title: 'Advert edit flagged',
     headline: `Flagged an edited advert to <#${SHARED.infractionsChannelId}>.`,
   });
+  await recordAdvisory(message, posted);
 }
 
 // ---- Member introductions ----------------------------------------------------
@@ -439,11 +535,162 @@ async function handleIntroEdit(message, sendLog) {
 
   const content = message.content ?? '';
   if (checks.runeLength(content) > INTRO.maxChars) {
-    await postAdvisory(message, sendLog, [introLengthAdvisory()], {
+    const posted = await postAdvisory(message, sendLog, [introLengthAdvisory()], {
+      edited: true,
+      lengthNote: true,
       title: 'Intro edit flagged',
       headline: `Flagged an edited intro to <#${SHARED.infractionsChannelId}>.`,
     });
+    await recordAdvisory(message, posted);
   }
+}
+
+// ---- Infraction re-check (auto-approval) sweep ------------------------------
+// Port of YAGPDB's infraction_recheck. A poll loop pulls posts whose re-check is
+// due (recordAdvisory arms the first one ~10m after an advisory) and re-tests
+// each against the FULL ruleset. The row keyed the post to its advisory ping, so
+// this closes the loop for whatever we flagged — edit path and offline failsafe
+// alike. See RECHECK_* config near the top of this file.
+
+const fetchChannelById = (client, id) =>
+  client.channels.cache.get(id) ?? client.channels.fetch(id).catch(() => null);
+
+// Cache key discord.js uses for a reaction: a custom emoji's id, else the unicode
+// glyph. Accepts "name:id", "<:name:id>", "<a:name:id>", a bare id, or unicode.
+function reactionKey(spec) {
+  const m = /:(\d{5,})>?$/.exec(spec || '');
+  return m ? m[1] : spec; // custom emoji → its id; bare id / unicode → as-is
+}
+
+// Remove ALL of one emoji's reactions from a post — mirrors YAGPDB's
+// deleteAllMessageReactions (needs Manage Messages). Non-fatal on failure.
+async function clearReaction(message, emojiSpec) {
+  if (!emojiSpec) return;
+  const reaction = message.reactions.cache.get(reactionKey(emojiSpec));
+  if (reaction) await reaction.remove().catch(() => {});
+}
+
+// Mark the #rule_infractions ping :staffapproved: — the auto-approval itself.
+async function approvePing(client, advisoryId) {
+  if (!SHARED.staffApprovedEmoji || !advisoryId) return;
+  const channel = await fetchChannelById(client, SHARED.infractionsChannelId);
+  if (!channel?.messages) return;
+  const ping = await channel.messages.fetch(advisoryId).catch(() => null);
+  if (ping) await ping.react(SHARED.staffApprovedEmoji).catch(() => {});
+}
+
+// Terminal-stage removal of a still-broken post. Suppresses the generic
+// "message deleted" log (this is an enforcement action, like reject) and records
+// the deletion in the archive. Warns staff on a permissions failure.
+async function deleteStalePost(post, sendLog) {
+  suppressedDeletes.add(post.id);
+  try {
+    await post.delete();
+    await db.markDeleted(post.id).catch(() => {});
+    return true;
+  } catch (err) {
+    suppressedDeletes.delete(post.id);
+    console.error(`[advert-recheck] terminal delete failed for ${post.id}: ${err.message}`);
+    if (sendLog) {
+      await sendLog({
+        content:
+          `⚠️ Infraction re-check could **not** remove <@${post.author?.id}>'s still-unfixed post in ` +
+          `<#${post.channelId}> (missing **Manage Messages**?). Left in place.`,
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
+    }
+    return false;
+  }
+}
+
+// One due row. clean → clear the flag + approve the ping + drop the row; gone →
+// drop the row; dirty → schedule the next stage, or at the terminal stage remove
+// the post (unless RECHECK_DELETE=false), approve the ping to close it out, and
+// drop the row. Transient fetch failures reschedule so the row is never lost.
+async function processRecheck(client, row, sendLog) {
+  const channel = await fetchChannelById(client, row.channel_id);
+  let post = null;
+  if (channel?.messages) {
+    post = await channel.messages.fetch(row.advert_id).catch((err) => (err.code === 10008 ? 'gone' : null));
+  }
+  if (post === 'gone') {
+    await db.clearAdvertInfraction(row.advert_id, row.advisory_id); // post removed — its flag died with it
+    return;
+  }
+  if (!post) {
+    // Couldn't read the post this time (channel/permission/network) — retry at the
+    // next cadence rather than lose or prematurely close the row.
+    const retryMin = RECHECK_STAGE_DELAYS_MIN[Math.min(row.stage, RECHECK_STAGE_DELAYS_MIN.length - 1)];
+    await db.advanceRecheck(row.advert_id, row.stage, new Date(Date.now() + retryMin * 60000), row.advisory_id);
+    return;
+  }
+
+  if (!(await isPostDirty(post))) {
+    await clearReaction(post, SHARED.staffPendingEmoji);
+    await approvePing(client, row.advisory_id);
+    await db.clearAdvertInfraction(row.advert_id, row.advisory_id);
+    return;
+  }
+
+  // Still in violation. Past the last scheduled stage → terminal: remove + close.
+  if (row.stage >= RECHECK_STAGE_DELAYS_MIN.length) {
+    if (RECHECK_DELETE) await deleteStalePost(post, sendLog);
+    await approvePing(client, row.advisory_id); // close the ping out either way
+    await db.clearAdvertInfraction(row.advert_id, row.advisory_id);
+    return;
+  }
+  // Not yet terminal → schedule the next stage.
+  const delayMin = RECHECK_STAGE_DELAYS_MIN[row.stage];
+  await db.advanceRecheck(row.advert_id, row.stage + 1, new Date(Date.now() + delayMin * 60000), row.advisory_id);
+}
+
+// Process every re-check that's currently due. Errors on one row never abort the
+// rest (or the poll loop).
+async function runDueRechecks(client, sendLog) {
+  if (!RECHECK_ENABLED) return;
+  let rows;
+  try {
+    rows = await db.getDueRechecks(new Date());
+  } catch (err) {
+    console.error('[advert-recheck] due query failed:', err.message);
+    return;
+  }
+  for (const row of rows) {
+    try {
+      await processRecheck(client, row, sendLog);
+    } catch (err) {
+      console.error(`[advert-recheck] stage ${row.stage} failed for ${row.advert_id}: ${err.message}`);
+    }
+  }
+}
+
+// In-process poll loop (hosts here run `npm start` with no cron), mirroring
+// checkLinks.scheduleLinkCheck. A re-entrancy guard keeps a slow sweep from
+// overlapping itself.
+function scheduleRechecks(client, sendLog) {
+  if (!RECHECK_ENABLED) {
+    console.log('[advert-recheck] disabled (INFRACTION_RECHECK=false).');
+    return;
+  }
+  if (!cfg.configured && !cfg.introConfigured) {
+    console.log('[advert-recheck] inactive — no advert/intro channels configured.');
+    return;
+  }
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await runDueRechecks(client, sendLog);
+    } finally {
+      running = false;
+    }
+  };
+  setInterval(tick, RECHECK_POLL_MS).unref?.();
+  console.log(
+    `[advert-recheck] armed — auto-approval re-checks polled every ${RECHECK_POLL_MS / 1000}s ` +
+      `(stages ~10/45/90/480m; terminal ${RECHECK_DELETE ? 'delete' : 'close-only'}).`
+  );
 }
 
 module.exports = {
@@ -452,8 +699,11 @@ module.exports = {
   consumeSuppressedDelete,
   handleIntro,
   handleIntroEdit,
+  scheduleRechecks,
+  runDueRechecks,
   configured: cfg.configured,
   introConfigured: cfg.introConfigured,
+  recheckActive: RECHECK_ENABLED && (cfg.configured || cfg.introConfigured),
   // True when edit-time enforcement is both switched on and has channels to act
   // on — lets index.js keep the messageUpdate fast-path when nothing needs it.
   editChecksActive: EDIT_CHECKS_ENABLED && cfg.configured,

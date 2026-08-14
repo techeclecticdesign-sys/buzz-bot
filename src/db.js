@@ -31,11 +31,13 @@ async function query(text, params, attempts = 3) {
 
 async function init() {
   // This bot only ever serves the one server, so guild_id was redundant on
-  // every table and is dropped to save storage. Message attachments are no
-  // longer archived either (they were the bulk of the row size). Each block
-  // below creates the current schema for fresh databases and migrates existing
-  // ones in place. Note: DROP COLUMN doesn't reclaim disk on its own — run
-  // `VACUUM FULL` (or let autovacuum churn) afterwards to actually shrink files.
+  // every table and is dropped to save storage. Full message-attachment
+  // archiving was dropped too (it was the bulk of the row size); the only images
+  // kept are those on GROUP advert posts, in group_advert_images, so the browse
+  // site can show them. Each block below creates the current schema for fresh
+  // databases and migrates existing ones in place. Note: DROP COLUMN doesn't
+  // reclaim disk on its own — run `VACUUM FULL` (or let autovacuum churn)
+  // afterwards to actually shrink files.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id          TEXT PRIMARY KEY,
@@ -45,12 +47,15 @@ async function init() {
       content     TEXT,
       created_at  TIMESTAMPTZ,
       edited_at   TIMESTAMPTZ,
-      deleted_at  TIMESTAMPTZ
+      deleted_at  TIMESTAMPTZ,
+      -- Image-attachment metadata for GROUP adverts only (array of
+      -- { pos, filename, contentType, width, height, size }; NULL otherwise).
+      -- The bytes live in group_advert_images. NULL for every non-group post.
+      attachments JSONB
     );
   `);
-  // guild_id is not part of the messages PK, so these drop cleanly in place.
+  // guild_id is not part of the messages PK, so it drops cleanly in place.
   await pool.query('ALTER TABLE messages DROP COLUMN IF EXISTS guild_id;');
-  await pool.query('ALTER TABLE messages DROP COLUMN IF EXISTS attachments;');
   // Reaction summary for advert posts (only advert channels are populated). Each
   // element is { id, name, animated, count }; NULL means no reactions. Kept live
   // by the reaction handlers and (re)seeded by backfill from the fetched message.
@@ -58,6 +63,23 @@ async function init() {
   await pool.query(
     'CREATE INDEX IF NOT EXISTS messages_channel_idx ON messages (channel_id);'
   );
+  // Image bytes for group adverts, kept out of the wide messages table. One row
+  // per image. Stored (not the Discord CDN url) because attachment urls are now
+  // signed and expire — same rationale as tcg_cards in the web app. The FK's
+  // ON DELETE CASCADE means the bytes are reclaimed automatically whenever the
+  // message row goes away (retention prune, soft-deleted purge), so images can
+  // never outlive their post.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS group_advert_images (
+      message_id   TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      pos          INT  NOT NULL,
+      channel_id   TEXT NOT NULL,
+      image        BYTEA NOT NULL,
+      content_type TEXT NOT NULL,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (message_id, pos)
+    );
+  `);
   // Speeds the daily retention prune (created_at < cutoff) and the advert
   // cleanup's age query.
   await pool.query(
@@ -224,6 +246,39 @@ async function init() {
   await pool.query(
     'CREATE INDEX IF NOT EXISTS name_history_user_idx ON name_history (user_id);'
   );
+
+  // One outstanding advisory per post, doubling as the infraction re-check queue
+  // (logger-bot's port of YAGPDB's infraction_recheck auto-approval). When an
+  // advert/intro trips an advisory we post it to #rule_infractions and record the
+  // ping id here, keyed by the post, along with the post's channel and the next
+  // re-check time. Two things read this row:
+  //   • bump — a later edit that trips again deletes the recorded ping and posts
+  //     a fresh one, so #rule_infractions shows one current advisory, not a stack.
+  //   • re-check — a poll loop re-tests the post on a schedule; when it comes back
+  //     clean it clears :staffpending: and marks the ping :staffapproved:, and at
+  //     the terminal stage a still-broken post is removed. The row is deleted once
+  //     the post is resolved / gone / closed out.
+  // Persisted so the schedule (and the bump target) survive a restart between
+  // stages. Low-volume: one row per post with an outstanding advisory.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS advert_infractions (
+      advert_id     TEXT PRIMARY KEY,
+      advisory_id   TEXT NOT NULL,
+      channel_id    TEXT,
+      stage         INT NOT NULL DEFAULT 1,
+      next_check_at TIMESTAMPTZ,
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  // Add the re-check columns to a table created before they existed (the bump-only
+  // first cut had just advert_id/advisory_id/updated_at).
+  await pool.query('ALTER TABLE advert_infractions ADD COLUMN IF NOT EXISTS channel_id TEXT;');
+  await pool.query('ALTER TABLE advert_infractions ADD COLUMN IF NOT EXISTS stage INT NOT NULL DEFAULT 1;');
+  await pool.query('ALTER TABLE advert_infractions ADD COLUMN IF NOT EXISTS next_check_at TIMESTAMPTZ;');
+  // The re-check sweep queries by due time.
+  await pool.query(
+    'CREATE INDEX IF NOT EXISTS advert_infractions_due_idx ON advert_infractions (next_check_at);'
+  );
 }
 
 // Append a full message record to the optional on-disk JSON archive (no DB
@@ -335,6 +390,52 @@ async function markDeleted(ids) {
     'UPDATE messages SET deleted_at = now() WHERE id = ANY($1)',
     [Array.isArray(ids) ? ids : [ids]]
   );
+}
+
+// Replace the stored image attachments for a group advert. `images` is an array
+// of { pos, filename, contentType, width, height, size, buffer }; pass [] to
+// clear. Metadata (everything but the bytes) is written to messages.attachments
+// for cheap layout reads on the site; the bytes go to group_advert_images. Done
+// in one transaction so a reader never sees metadata without its bytes. The
+// message row must already exist (callers upsert it first).
+async function setAdvertAttachments(messageId, channelId, images) {
+  const meta = images.map((a) => ({
+    pos: a.pos,
+    filename: a.filename ?? null,
+    contentType: a.contentType,
+    width: a.width ?? null,
+    height: a.height ?? null,
+    size: a.size ?? (a.buffer ? a.buffer.length : null),
+  }));
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE messages SET attachments = $2 WHERE id = $1', [
+      messageId,
+      meta.length ? JSON.stringify(meta) : null,
+    ]);
+    await client.query('DELETE FROM group_advert_images WHERE message_id = $1', [messageId]);
+    for (const a of images) {
+      await client.query(
+        `INSERT INTO group_advert_images (message_id, pos, channel_id, image, content_type)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [messageId, a.pos, channelId, a.buffer, a.contentType]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Drop a group advert's stored images (metadata + bytes). Used when the post is
+// deleted so nothing dangles.
+async function clearAdvertAttachments(messageId) {
+  await query('UPDATE messages SET attachments = NULL WHERE id = $1', [messageId]);
+  await query('DELETE FROM group_advert_images WHERE message_id = $1', [messageId]);
 }
 
 // --- Member state (nickname + role tracking) ---
@@ -538,6 +639,64 @@ async function clearResolvedFlaggedPosts(currentIds, reason) {
   await query('DELETE FROM flagged_posts WHERE reason = $1 AND NOT (message_id = ANY($2))', [reason, currentIds]);
 }
 
+// --- Edit-infraction advisory tracking + re-check queue ---
+
+// The current row for a post (advisory id we posted, its channel, re-check
+// stage), or null if none is outstanding. Used by bump (needs advisory_id).
+async function getAdvertInfraction(advertId) {
+  const { rows } = await query(
+    'SELECT advert_id, advisory_id, channel_id, stage, next_check_at FROM advert_infractions WHERE advert_id = $1',
+    [advertId]
+  );
+  return rows[0] ?? null;
+}
+
+// Record the advisory we just posted for a post and (re)arm its re-check clock at
+// stage 1. Replaces any prior row for the post (a fresh edit restarts the clock).
+async function setAdvertInfraction(advertId, advisoryId, channelId, nextCheckAt) {
+  await query(
+    `INSERT INTO advert_infractions (advert_id, advisory_id, channel_id, stage, next_check_at, updated_at)
+     VALUES ($1, $2, $3, 1, $4, now())
+     ON CONFLICT (advert_id)
+       DO UPDATE SET advisory_id = $2, channel_id = $3, stage = 1, next_check_at = $4, updated_at = now()`,
+    [advertId, advisoryId, channelId, nextCheckAt]
+  );
+}
+
+// Rows whose re-check is due (next_check_at at or before `now`). Oldest first.
+async function getDueRechecks(now, limit = 50) {
+  const { rows } = await query(
+    `SELECT advert_id, advisory_id, channel_id, stage, next_check_at
+     FROM advert_infractions
+     WHERE next_check_at IS NOT NULL AND next_check_at <= $1
+     ORDER BY next_check_at ASC LIMIT $2`,
+    [now, limit]
+  );
+  return rows;
+}
+
+// Advance a still-dirty post to its next re-check stage/time. Guarded on
+// advisory_id: if a concurrent edit re-armed the row with a NEW advisory while
+// this sweep was in flight, the id won't match and the stale advance no-ops
+// (the fresh advisory keeps its own stage-1 clock).
+async function advanceRecheck(advertId, stage, nextCheckAt, advisoryId) {
+  await query(
+    'UPDATE advert_infractions SET stage = $2, next_check_at = $3, updated_at = now() WHERE advert_id = $1 AND advisory_id = $4',
+    [advertId, stage, nextCheckAt, advisoryId]
+  );
+}
+
+// Drop the row. `advisoryId`, when given, guards against clobbering a newer
+// advisory a concurrent edit armed while this sweep was resolving the old one —
+// only the row still pointing at the advisory we acted on is deleted.
+async function clearAdvertInfraction(advertId, advisoryId) {
+  if (advisoryId) {
+    await query('DELETE FROM advert_infractions WHERE advert_id = $1 AND advisory_id = $2', [advertId, advisoryId]);
+  } else {
+    await query('DELETE FROM advert_infractions WHERE advert_id = $1', [advertId]);
+  }
+}
+
 // --- Retention (prune the archive so DB storage stays bounded) ---
 // These only trim the local database — nothing on Discord is touched.
 
@@ -573,6 +732,24 @@ async function pruneMessagesNotInChannels(channelIds, cutoff, limit = 5000) {
   return res.rowCount;
 }
 
+// Hard-delete messages that were deleted (deleted_at set) longer ago than
+// `cutoff` — i.e. a post that's been logged and removed and is no longer needed
+// by anything (see retention.js for why the cutoff must clear the advert repost
+// cooldown). Any group_advert_images rows cascade away with them. Batched via
+// ctid like the prunes above.
+async function pruneSoftDeletedMessages(cutoff, limit = 5000) {
+  const res = await query(
+    `DELETE FROM messages
+     WHERE ctid IN (
+       SELECT ctid FROM messages
+       WHERE deleted_at IS NOT NULL AND deleted_at < $1
+       LIMIT $2
+     )`,
+    [cutoff, limit]
+  );
+  return res.rowCount;
+}
+
 module.exports = {
   pool,
   init,
@@ -581,6 +758,7 @@ module.exports = {
   archiveMessageJson,
   pruneMessagesInChannels,
   pruneMessagesNotInChannels,
+  pruneSoftDeletedMessages,
   getMessage,
   getMessages,
   getStandingAdvert,
@@ -588,6 +766,8 @@ module.exports = {
   getStandingAdvertsInChannels,
   updateContent,
   markDeleted,
+  setAdvertAttachments,
+  clearAdvertAttachments,
   getMemberState,
   seedMemberState,
   setMemberState,
@@ -605,4 +785,9 @@ module.exports = {
   flagPost,
   clearFlaggedPosts,
   clearResolvedFlaggedPosts,
+  getAdvertInfraction,
+  setAdvertInfraction,
+  getDueRechecks,
+  advanceRecheck,
+  clearAdvertInfraction,
 };
