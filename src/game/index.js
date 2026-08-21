@@ -3,8 +3,9 @@
 // Everything is gated on GAME_ENABLED so the bot can run without the game.
 const db = require('./db');
 const commands = require('./commands');
+const config = require('../config');
 
-const ENABLED = process.env.GAME_ENABLED !== 'false';
+const ENABLED = config.bool('GAME_ENABLED', true);
 
 async function init() {
   await db.init();

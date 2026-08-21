@@ -4,14 +4,19 @@ const data = require('./gameData');
 
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const HOUR_MS = 3600000;
+const DAY_MS = 86400000;
 
-// Apply time-based regen (energy, hp) up to "now". Mutates and returns player.
-// Cheap and idempotent — safe to call at the start of every action.
+// Apply time-based regen (energy, hp) and bank any property income up to "now".
+// Mutates and returns player. Cheap and idempotent — safe to call at the start
+// of every action, which is why there's no separate "collect" step: money is
+// banked into cash the moment you touch the game.
 function materialize(player, now = Date.now()) {
-  // Energy refills to max over refillHours.
+  // Energy refills to max over refillHours. Clamp elapsed to >= 0 so a future
+  // energy_updated_at (DB/bot clock skew) can't drive energy below its stored
+  // value. Mirrors HP regen below.
   const eMax = data.maxEnergy(player.level);
   const ePerMs = eMax / (data.ENERGY.refillHours * HOUR_MS);
-  const eElapsed = now - new Date(player.energy_updated_at).getTime();
+  const eElapsed = Math.max(0, now - new Date(player.energy_updated_at).getTime());
   player.energy = Math.min(eMax, Number(player.energy) + eElapsed * ePerMs);
   player.energy_updated_at = new Date(now);
 
@@ -22,6 +27,12 @@ function materialize(player, now = Date.now()) {
   const regenFrom = Math.max(new Date(player.hp_updated_at).getTime(), hospEnd);
   player.hp = Math.min(hMax, Number(player.hp) + (Math.max(0, now - regenFrom) / HOUR_MS) * data.HP.regenPerHour);
   player.hp_updated_at = new Date(now);
+
+  // Property income accrues continuously and is banked straight into cash — no
+  // cap, no manual collect. Advance the meter's timestamp so it's counted once.
+  const income = propertyIncome(player, now);
+  if (income > 0) player.cash = Number(player.cash) + income;
+  if (player.property_id) player.property_collected_at = new Date(now);
   return player;
 }
 
@@ -55,10 +66,12 @@ function doCrime(player, crime, now = Date.now()) {
     return { success: true, cash, xp, levels };
   }
   // A failed crime is usually a clean getaway, but sometimes the job is
-  // botched — a hospital stay (no HP loss, unlike a combat trip).
+  // botched — a stint in jail (no HP loss, unlike a combat trip). Same timer as
+  // a combat KO; incap_reason just labels it 'jail' vs 'hospital' for the copy.
   if (Math.random() < data.CRIME_FAIL.hospitalChance) {
     const mins = randInt(data.CRIME_FAIL.hospitalMinMinutes, data.CRIME_FAIL.hospitalMaxMinutes);
     player.hospital_until = new Date(now + mins * 60000);
+    player.incap_reason = 'jail';
     return { success: false, botched: true };
   }
   return { success: false, botched: false };
@@ -117,11 +130,13 @@ function resolveAttack(attacker, defender, now = Date.now()) {
     attacker.respect += 1;
     defender.hp = Math.max(1, data.maxHp(defender.level) * 0.1);
     defender.hospital_until = new Date(now + data.COMBAT.hospitalHours * HOUR_MS);
+    defender.incap_reason = 'hospital';
     return { won: true, steal, xp, levels };
   }
   // Attacker picked the fight and lost: they take the hospital trip.
   attacker.hp = Math.max(1, data.maxHp(attacker.level) * 0.1);
   attacker.hospital_until = new Date(now + data.COMBAT.hospitalHours * HOUR_MS);
+  attacker.incap_reason = 'hospital';
   return { won: false };
 }
 
@@ -131,21 +146,23 @@ function attackCooldownLeftMs(attacker, now = Date.now()) {
   return Math.max(0, left);
 }
 
-// --- Property income (Phase 2), capped at PROPERTY_CAP_HOURS of accrual ---
+// --- Property income (Phase 2) — continuous and uncapped. Pure calc: returns
+// the income accrued since the meter was last advanced, WITHOUT mutating the
+// player, so read-only surfaces (e.g. /top) can add it without banking it.
+// materialize() is what actually banks it into cash.
 function propertyIncome(player, now = Date.now()) {
   if (!player.property_id) return 0;
   const prop = data.PROPERTIES_BY_ID[player.property_id];
   if (!prop) return 0;
   const since = player.property_collected_at ? new Date(player.property_collected_at).getTime() : now;
-  const hours = Math.min(data.PROPERTY_CAP_HOURS, Math.max(0, (now - since) / HOUR_MS));
-  return Math.floor(hours * prop.perHour);
+  const days = Math.max(0, (now - since) / DAY_MS);
+  return Math.floor(days * prop.perDay);
 }
 
-function collectProperty(player, now = Date.now()) {
-  const income = propertyIncome(player, now);
-  if (income > 0) player.cash = Number(player.cash) + income;
-  if (player.property_id) player.property_collected_at = new Date(now);
-  return income;
+// A player's live cash including property income not yet banked by materialize().
+// Read-only — use where you show a balance without running a full action.
+function liveCash(player, now = Date.now()) {
+  return Number(player.cash) + propertyIncome(player, now);
 }
 
 // Convenience getters for the UI.
@@ -165,7 +182,7 @@ module.exports = {
   resolveAttack,
   attackCooldownLeftMs,
   propertyIncome,
-  collectProperty,
+  liveCash,
   energyNow,
   unlockedCrimes,
   randInt,

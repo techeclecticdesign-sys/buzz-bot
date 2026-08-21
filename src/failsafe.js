@@ -1,16 +1,11 @@
-// Failsafe features that activate only while the YAGPDB bot ("Jarvis") is
-// offline. YAGPDB is the source of truth for the server's automation; this bot
-// only fills in during an outage. As long as ONE YAGPDB instance is online,
-// every action in here no-ops.
-//
-// Knowing whether YAGPDB is online requires the privileged GuildPresences
-// intent — there is no other way to observe another bot's status. The whole
-// failsafe (and that intent) can therefore be switched off with
-// FAILSAFE_ENABLED=false, which lets the bot boot even if the intent isn't
-// enabled in the Developer Portal.
+// Features that act only while YAGPDB ("Jarvis") is offline; while any YAGPDB
+// instance is online, everything here no-ops. Detecting that needs the privileged
+// GuildPresences intent, so the whole failsafe can be disabled with
+// FAILSAFE_ENABLED=false (lets the bot boot without the intent).
 const { EmbedBuilder } = require('discord.js');
+const config = require('./config');
 
-const ENABLED = process.env.FAILSAFE_ENABLED !== 'false';
+const ENABLED = config.bool('FAILSAFE_ENABLED', true);
 
 // Role given to members on join while YAGPDB is down. Defaults to RPC's
 // "Age Please" gate role.
@@ -19,9 +14,7 @@ const AGE_PLEASE_ROLE_ID = process.env.AGE_PLEASE_ROLE_ID || '735544386678554738
 // Optional comma-separated known YAGPDB bot user IDs. User IDs never change, so
 // pinning them is the most reliable match; the username heuristic below is the
 // fallback when none are pinned.
-const PINNED_IDS = new Set(
-  (process.env.YAGPDB_BOT_IDS || '').split(',').map((s) => s.trim()).filter(Boolean)
-);
+const PINNED_IDS = new Set(config.idList('YAGPDB_BOT_IDS'));
 
 // Lowercase and drop everything but letters/digits so punctuation and the
 // #discriminator (which can change) don't matter: "YAGPDB.xyz#8760" → "yagpdbxyz".
@@ -77,16 +70,10 @@ function offlineForMs(guild) {
   return last === undefined ? Infinity : Date.now() - last;
 }
 
-// Assign the Age Please role on join — always, as soon as a member joins, so the
-// gate is applied immediately rather than waiting on YAGPDB. YAGPDB normally
-// assigns it too; role adds are idempotent (roles are a set), so both firing is
-// harmless — whoever is second is a no-op, and the cache check below skips even
-// that redundant call when the role is already present.
-//
-// `sendLog` is index.js's log-channel sender, passed in to avoid a circular
-// require. The log-channel embed is reserved for the notable case — YAGPDB
-// actually being offline — so normal joins don't spam the log; those get a plain
-// console line instead.
+// Assign the Age Please role on join immediately (idempotent, so YAGPDB also
+// assigning it is harmless; the cache check below skips the redundant call).
+// sendLog is passed in to avoid a circular require; the embed fires only when
+// YAGPDB is actually offline (normal joins get a console line, not log spam).
 async function handleMemberJoin(member, sendLog) {
   if (!ENABLED) return;
   if (member.user.bot) return; // gate roles are for people, not bots
@@ -109,8 +96,7 @@ async function handleMemberJoin(member, sendLog) {
       `[failsafe] assigned Age Please to ${member.user.tag}` +
       (yagpdbDown ? ' (YAGPDB offline)' : '')
     );
-    // Only surface the orange failsafe embed when YAGPDB is genuinely down;
-    // logging every normal join would flood the log channel.
+    // Only surface the failsafe embed when YAGPDB is genuinely down.
     if (sendLog && yagpdbDown) {
       const embed = new EmbedBuilder()
         .setColor(0xe67e22)

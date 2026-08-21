@@ -7,12 +7,9 @@
 // category, listing a category excludes every channel (and their threads) under
 // it, and listing a text channel excludes its threads. Member/name/role logging
 // isn't channel-scoped, so it's unaffected.
-const ids = new Set(
-  (process.env.IGNORE_CHANNELS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-);
+const config = require('./config');
+
+const ids = new Set(config.idList('IGNORE_CHANNELS'));
 
 // True if this channel (or its category / thread-parent) is on the ignore list.
 // Accepts a discord.js channel; safe to call with null/undefined.

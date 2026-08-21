@@ -1,62 +1,52 @@
-// Advert failsafe — enforces the RPC advert rules while YAGPDB is offline.
-// Mirrors the YAGPDB consolidated advert commands (group / 1x1 / quick):
+// Advert failsafe — enforces the RPC advert rules while YAGPDB is offline,
+// mirroring its consolidated advert commands (group / 1x1 / quick):
 //   HARD (delete + DM): length, cooldown, duplicate-in-channel
 //   ADVISORY (keep + one ping to #rule_infractions): headers / images / links /
 //   banned words / cross-channel duplicate
-// Scope note: this version does NOT replicate the infraction ledger or advert
-// bans — those live only in YAGPDB's database and can't be shared.
-//
-// Cooldown/duplicate state is read from the logger-bot's own message archive,
-// so it's already "warm" the moment an outage starts. Everything here is gated
-// on YAGPDB being offline; while YAGPDB is up this module does nothing.
+// It doesn't replicate the infraction ledger or advert bans (those live only in
+// YAGPDB). Cooldown/duplicate state reads from this bot's own message archive, so
+// it's accurate from the first post of an outage. Gated on YAGPDB being offline.
 const { EmbedBuilder } = require('discord.js');
 const db = require('./db');
 const failsafe = require('./failsafe');
 const cfg = require('./advertConfig');
 const checks = require('./advertChecks');
+const infractionSticky = require('./infractionSticky');
+const config = require('./config');
 
 const { SHARED, INTRO } = cfg;
 
 // The advert failsafe deletes posts, so require YAGPDB to be offline for a
 // sustained period before acting — this rides out a brief presence blip from a
 // reconnecting YAGPDB. Tunable via ADVERT_MIN_OFFLINE_SECS (default 60s).
-const ADVERT_MIN_OFFLINE_MS = (Number(process.env.ADVERT_MIN_OFFLINE_SECS) || 60) * 1000;
+const ADVERT_MIN_OFFLINE_MS = config.num('ADVERT_MIN_OFFLINE_SECS', 60) * 1000;
 
-// Edit-time checks are NOT a failsafe: YAGPDB's free tier can't trigger custom
-// commands on message edits at all, so this fills a permanent gap rather than an
-// outage. It therefore runs whether or not YAGPDB is online. Toggle off with
+// Edit-time checks aren't a failsafe: YAGPDB can't run commands on edits on any
+// tier, so this runs whether or not YAGPDB is online. Toggle off with
 // ADVERT_EDIT_CHECKS=false.
-const EDIT_CHECKS_ENABLED = process.env.ADVERT_EDIT_CHECKS !== 'false';
+const EDIT_CHECKS_ENABLED = config.bool('ADVERT_EDIT_CHECKS', true);
 
-// Infraction re-check (auto-approval) — logger-bot's port of YAGPDB's
-// infraction_recheck. After we post an advisory, a poll loop re-tests the post
-// on a schedule: the first time it comes back clean the :staffpending: flag is
-// removed from the post and the #rule_infractions ping is marked :staffapproved:;
-// a post still broken at the terminal stage is removed and its ping approved to
-// close it out. Applies to whatever we flagged, so it covers BOTH the edit path
-// and the offline failsafe. Toggle off with INFRACTION_RECHECK=false; keep the
-// post (approve + close without deleting) at the terminal stage with
-// INFRACTION_RECHECK_DELETE=false.
-const RECHECK_ENABLED = process.env.INFRACTION_RECHECK !== 'false';
-const RECHECK_DELETE = process.env.INFRACTION_RECHECK_DELETE !== 'false';
-// Stage times, mirroring YAGPDB: first re-check 10m after the ping, then 45m,
-// 90m, and 480m (~8h). Stored as the delay (minutes) FROM the previous stage —
-// [0] is the initial arm, [1..] each escalate a still-dirty post; once past the
-// last entry the post is at the terminal stage (removed / closed). Hardcoded on
-// purpose: this drives a destructive auto-delete, so the timing is not something
-// an env var should be able to compress.
+// Infraction re-check: after an advisory is posted, a poll loop re-tests the post.
+// Clean → clear :staffpending: + mark the ping :staffapproved:; still broken at the
+// terminal stage → remove the post + approve the ping to close it out. Covers both
+// the edit path and the offline failsafe. Toggle: INFRACTION_RECHECK=false off;
+// INFRACTION_RECHECK_DELETE=false closes without deleting.
+const RECHECK_ENABLED = config.bool('INFRACTION_RECHECK', true);
+const RECHECK_DELETE = config.bool('INFRACTION_RECHECK_DELETE', true);
+// Re-check stage delays (minutes from the previous stage) → 10, 45, 90, 480m
+// absolute. Past the last entry the post is at the terminal stage (removed/closed).
+// Hardcoded on purpose: this drives a destructive auto-delete.
 const RECHECK_STAGE_DELAYS_MIN = [10, 35, 45, 390]; // → 10, 45, 90, 480 absolute
-const RECHECK_POLL_MS = Math.max(30, Number(process.env.INFRACTION_RECHECK_POLL_SECS) || 60) * 1000;
+const RECHECK_POLL_MS = config.num('INFRACTION_RECHECK_POLL_SECS', 60, { min: 30 }) * 1000;
 
 function truncate(str, max) {
   if (!str) return str;
   return str.length > max ? str.slice(0, max - 1) + '…' : str;
 }
 
-// IDs of posts this module is deleting right now. The messageDelete handler
-// consumes these so a failsafe removal doesn't also spawn a generic "Message
-// deleted" embed (which would redundantly show the bot as the deleter) — the
-// "advert removed" embed below is the single log entry.
+// IDs this module is deleting right now. The messageDelete handler consumes these
+// so a failsafe removal doesn't also spawn a generic "Message deleted" embed; the
+// "advert removed" embed is the single log entry.
 const suppressedDeletes = new Set();
 
 // True (and forgets the id) if this delete came from the advert failsafe.
@@ -206,24 +196,25 @@ async function reject(message, sendLog, name, channelName, dm, tag, noun = 'adve
   } catch {
     /* author has DMs closed — the post is already removed, nothing else to do */
   }
-  // No general-log echo for a successful removal: infractions do not go to
-  // general logs. (The missing-permissions warning above is kept — that's an
-  // operational "the failsafe couldn't act" alert, not an infraction record.)
+  // No general-log echo for a removal (infractions don't go to general logs); the
+  // missing-permissions warning above stays — that's an operational alert.
 }
 
 async function crossChannelDup(message, content) {
   const norm = checks.normalizeForDupe(content);
   if (norm.length < 15) return null;
   const rows = await db.getStandingAdvertsInChannels(message.author.id, cfg.ALL_ADVERT_CHANNELS, message.channelId);
+  // Only an OLDER copy (smaller snowflake) counts, so the oldest never judges
+  // itself a dupe and a pair can't both delete themselves — the oldest survives.
+  const selfId = BigInt(message.id);
   for (const r of rows) {
-    if (checks.normalizeForDupe(r.content) === norm) return r.channel_id;
+    if (BigInt(r.id) < selfId && checks.normalizeForDupe(r.content) === norm) return r.channel_id;
   }
   return null;
 }
 
-// Post the one combined advisory ping. `opts.title` / `opts.headline` set the
-// staff-log wording so the create path (a genuine outage) and the edit path (runs
-// whether or not YAGPDB is online) each read accurately.
+// Post the one combined advisory ping. opts.title/headline set the staff-log
+// wording for the create path (outage) vs the edit path.
 async function postAdvisory(message, sendLog, issues, opts = {}) {
   const {
     title = 'Failsafe: advert flagged',
@@ -232,15 +223,13 @@ async function postAdvisory(message, sendLog, issues, opts = {}) {
     edited = false,
   } = opts;
   const body = issues.map((i) => `\n• ${i}`).join('');
-  // The emoji/character-count note only makes sense next to a length advisory
-  // (which only edits produce — a new post over the limit is deleted, not
-  // pinged). Appending it to header/image/link advisories was just noise.
+  // The character-count note only fits a length advisory (edits only — a new
+  // over-limit post is deleted, not pinged).
   const note = lengthNote
     ? '\n\nNote: we count character length the same way Discord does, so custom emoji can easily be ' +
       'more than 30 characters apiece even though they show as one.'
     : '';
-  // On the edit path, name it an "edited post" so the member (and staff) can tell
-  // this fired on a later edit, not the original post YAGPDB already flagged.
+  // Name it "edited post" so it's clear this fired on an edit, not the original.
   const subject = edited ? 'edited post' : 'post';
   const text = truncate(
     `Hey <@${message.author.id}> ! A few things to fix in your ${subject} in <#${message.channelId}>:${body}${note}`,
@@ -250,6 +239,8 @@ async function postAdvisory(message, sendLog, issues, opts = {}) {
   let sent = null;
   if (channel) {
     sent = await channel.send({ content: text, allowedMentions: { users: [message.author.id] } });
+    // Ledger it for our own expiry sweep (YAGPDB's expiry skips our bot posts).
+    if (sent) await db.recordInfractionPost(sent.id, sent.channelId).catch(() => {});
   }
   if (SHARED.staffPendingEmoji) {
     try {
@@ -258,20 +249,17 @@ async function postAdvisory(message, sendLog, issues, opts = {}) {
       /* emoji unavailable or missing Add Reactions — non-fatal */
     }
   }
-  // No general-log echo: the advisory already lives in #rule_infractions and the
-  // :staffpending: flag sits on the post. Infractions do not go to general logs.
+  // No general-log echo (the advisory lives in #rule_infractions). Re-stick the
+  // sticky under it — YAGPDB won't (its triggers skip bot posts).
+  if (sent && channel) await infractionSticky.reassertBelow(channel);
   // The sent message is returned so the edit path can "bump" it on a re-edit.
   return sent;
 }
 
-// Called after an advisory is posted (edit path or offline failsafe). Two jobs,
-// both keyed to the offending post so there's exactly one live advisory per post:
-//   • BUMP — if a prior advisory is remembered for this post, delete it now that a
-//     fresh one exists, so #rule_infractions shows one current ping, not a stack.
-//   • ARM the re-check — record the new advisory id + the post's channel and set
-//     the first re-check ~10m out, restarting the clock (a fresh edit gets a fresh
-//     window). The poll loop takes it from there.
-// `posted` is the just-sent advisory (null when nothing tripped → no-op).
+// After an advisory is posted, keyed to the post so there's one live advisory each:
+//   • BUMP — delete any prior advisory for this post so the channel shows one ping.
+//   • ARM the re-check — record the new advisory + channel, first re-check ~10m out.
+// `posted` is null when nothing tripped → no-op.
 async function recordAdvisory(message, posted) {
   if (!posted) return;
   try {
@@ -307,10 +295,8 @@ async function enforceLength(message, sendLog, type, name, channelName, content,
   return true;
 }
 
-// LENGTH as an ADVISORY (edits only): rather than delete a post someone is in the
-// middle of editing, keep it and warn — same bullet tone as the other advisories,
-// with the quick channels pointing at their long-form counterpart the way the
-// cross-channel-dup advisory links a channel.
+// LENGTH as an ADVISORY (edits only): keep the post and warn instead of deleting
+// mid-edit; quick channels point at their long-form counterpart.
 function lengthAdvisory(type, message) {
   if (type.lengthMode === 'words') {
     const lf = cfg.QUICK_LONGFORM_BY_NAME[message.channel?.name];
@@ -354,21 +340,19 @@ async function collectIssues(message, type, content) {
   return issues;
 }
 
-// Collect + post the one combined advisory. `leadIssues` are prepended (the edit
-// path uses this for the over-length warning) so everything lands in a single
-// ping. Returns the posted advisory message (so callers can bump / arm the
-// re-check), or null when nothing tripped.
+// Collect + post the one combined advisory. leadIssues are prepended (the edit
+// path uses this for the over-length warning). Returns the advisory message (for
+// bump / re-check arming), or null when nothing tripped.
 async function runAdvisories(message, sendLog, type, content, leadIssues = [], advisoryOpts = {}) {
   const issues = [...leadIssues, ...(await collectIssues(message, type, content))];
   if (!issues.length) return null;
   return postAdvisory(message, sendLog, issues, advisoryOpts);
 }
 
-// Is this post still in violation? The re-check's "dirty" test — same ruleset the
-// advisory uses (length + every collectIssues hit), so :staffpending: only clears
-// once the post passes the FULL set, not just the rule that first flagged it.
-// Resolves the channel type itself; intros (not an advert type) fall back to
-// their own 800-char rule. An unknown channel is treated as clean (nothing to do).
+// The re-check's "dirty" test: is the post still in violation? Same ruleset as the
+// advisory (length + every collectIssues hit), so :staffpending: clears only once
+// it passes the full set. Intros fall back to their 800-char rule; unknown channel
+// = clean.
 async function isPostDirty(message) {
   const content = message.content ?? '';
   const type = cfg.typeForChannel(message.channelId);
@@ -430,28 +414,19 @@ async function handleAdvert(message, sendLog) {
   await recordAdvisory(message, posted); // arm the auto-approval re-check
 }
 
-// Entry point for message *edits*, called from messageUpdate. YAGPDB's free tier
-// can't run custom commands on edits, so this isn't gated on a YAGPDB outage the
-// way handleAdvert is — it always enforces, closing a hole where a member could
-// post a clean ad and then edit in something that breaks the rules.
-//
-// Edits are NON-DESTRUCTIVE: unlike a new post, an over-length edit isn't
-// deleted — deleting a post out from under someone mid-edit is too harsh. Length
-// instead becomes an advisory that rides along in the same combined ping, warning
-// the author to fix it or the ad will be removed (by staff, on review). Cooldown
-// and duplicate-in-channel are skipped entirely: they're about how often / how
-// many times someone *posts*, which editing an existing post isn't.
+// Entry point for message edits (from messageUpdate). YAGPDB can't run on edits,
+// so this always enforces (not gated on an outage), closing the "post clean, then
+// edit in a violation" hole. Non-destructive: over-length becomes an advisory in
+// the combined ping, not a delete. Cooldown/duplicate-in-channel are skipped
+// (they're about posting frequency, not edits).
 async function handleAdvertEdit(message, sendLog) {
   if (!EDIT_CHECKS_ENABLED || !cfg.configured) return;
   if (!message.guild || message.author.bot || message.system) return;
   const type = cfg.typeForChannel(message.channelId);
   if (!type) return; // not a configured advert channel
 
-  // Re-run every content rule on the edited post: YAGPDB (free tier) can't run on
-  // edits at all, so this is the only thing enforcing them after an edit. Over-
-  // length rides along as an advisory lead (non-destructive — warn, don't delete
-  // a post someone is mid-edit on). recordAdvisory below keeps this to one live
-  // advisory per post no matter how many times they edit, and arms the re-check.
+  // Over-length rides along as an advisory lead (non-destructive). recordAdvisory
+  // keeps one live advisory per post across repeated edits and arms the re-check.
   const content = message.content ?? '';
   const lead = isOverLength(type, content) ? [lengthAdvisory(type, message)] : [];
   const posted = await runAdvisories(message, sendLog, type, content, lead, {
@@ -546,11 +521,9 @@ async function handleIntroEdit(message, sendLog) {
 }
 
 // ---- Infraction re-check (auto-approval) sweep ------------------------------
-// Port of YAGPDB's infraction_recheck. A poll loop pulls posts whose re-check is
-// due (recordAdvisory arms the first one ~10m after an advisory) and re-tests
-// each against the FULL ruleset. The row keyed the post to its advisory ping, so
-// this closes the loop for whatever we flagged — edit path and offline failsafe
-// alike. See RECHECK_* config near the top of this file.
+// A poll loop pulls posts whose re-check is due (armed ~10m after an advisory) and
+// re-tests each against the full ruleset. Covers the edit path and the offline
+// failsafe. See RECHECK_* config near the top of this file.
 
 const fetchChannelById = (client, id) =>
   client.channels.cache.get(id) ?? client.channels.fetch(id).catch(() => null);
@@ -577,6 +550,20 @@ async function approvePing(client, advisoryId) {
   if (!channel?.messages) return;
   const ping = await channel.messages.fetch(advisoryId).catch(() => null);
   if (ping) await ping.react(SHARED.staffApprovedEmoji).catch(() => {});
+}
+
+// Has a HUMAN signed this ping off with :staffapproved:? A moderator reacting it
+// means "reviewed, keep the post" — after which we must never auto-delete it. We
+// only add it ourselves while closing a row out (then the row is gone), so seeing
+// it on a still-open row means a human did. False if unconfigured/ping gone/none.
+async function pingHasStaffApproval(client, advisoryId) {
+  if (!SHARED.staffApprovedEmoji || !advisoryId) return false;
+  const channel = await fetchChannelById(client, SHARED.infractionsChannelId);
+  if (!channel?.messages) return false;
+  const ping = await channel.messages.fetch(advisoryId).catch(() => null);
+  if (!ping) return false;
+  const reaction = ping.reactions.cache.get(reactionKey(SHARED.staffApprovedEmoji));
+  return !!(reaction && reaction.count > 0);
 }
 
 // Terminal-stage removal of a still-broken post. Suppresses the generic
@@ -622,6 +609,14 @@ async function processRecheck(client, row, sendLog) {
     // next cadence rather than lose or prematurely close the row.
     const retryMin = RECHECK_STAGE_DELAYS_MIN[Math.min(row.stage, RECHECK_STAGE_DELAYS_MIN.length - 1)];
     await db.advanceRecheck(row.advert_id, row.stage, new Date(Date.now() + retryMin * 60000), row.advisory_id);
+    return;
+  }
+
+  // Staff sign-off veto: a human :staffapproved: on the ping means "keep the post"
+  // — clear the pending flag and stop, never auto-delete something staff approved.
+  if (await pingHasStaffApproval(client, row.advisory_id)) {
+    await clearReaction(post, SHARED.staffPendingEmoji);
+    await db.clearAdvertInfraction(row.advert_id, row.advisory_id);
     return;
   }
 

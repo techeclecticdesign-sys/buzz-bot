@@ -76,13 +76,14 @@ const ARMORS = [
   { id: 'kevlar', name: 'Kevlar', cost: 60000, mult: 1.5 },
   { id: 'riot', name: 'Riot gear', cost: 300000, mult: 2.0 },
 ];
-// ---- Property (Phase 2) — passive income, capped at 24h of accrual ----
+// ---- Property (Phase 2) — continuous passive income, banked automatically (no
+// cap, no manual collect). perDay income accrues lazily by the fraction of a day
+// elapsed (see propertyIncome() in logic.js). Paybacks: 25 / 33 / 42 days.
 const PROPERTIES = [
-  { id: 'corner', name: 'Corner store', cost: 5000, perHour: 200 },
-  { id: 'nightclub', name: 'Nightclub', cost: 50000, perHour: 1500 },
-  { id: 'casino', name: 'Casino', cost: 500000, perHour: 12000 },
+  { id: 'corner', name: 'Corner store', cost: 5000, perDay: 200 }, // ~25-day payback
+  { id: 'nightclub', name: 'Nightclub', cost: 50000, perDay: 1500 }, // ~33-day payback
+  { id: 'casino', name: 'Casino', cost: 500000, perDay: 12000 }, // ~42-day payback
 ];
-const PROPERTY_CAP_HOURS = 24;
 
 const byId = (arr) => Object.fromEntries(arr.map((x) => [x.id, x]));
 
@@ -104,5 +105,4 @@ module.exports = {
   ARMORS_BY_ID: byId(ARMORS),
   PROPERTIES,
   PROPERTIES_BY_ID: byId(PROPERTIES),
-  PROPERTY_CAP_HOURS,
 };

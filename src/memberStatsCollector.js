@@ -18,6 +18,7 @@
 // passes the bot's live client + db pool for the scheduled incremental run;
 // src/memberStats.js passes a throwaway client + pool for a manual full scan.
 const { MessageType } = require('discord.js');
+const config = require('./config');
 
 // --- Config ---------------------------------------------------------------
 const JOINLEAVE_CHANNEL_ID = '404079275734466560';
@@ -33,12 +34,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const OVERLAP_MS = 2 * DAY_MS;
 
 // Scheduling (only used when the bot drives this — the standalone script ignores it).
-const ENABLED = process.env.MEMBER_STATS_ENABLED !== 'false';
+const ENABLED = config.bool('MEMBER_STATS_ENABLED', true);
 // The stats page buckets days in UTC (memberStats.ts uses AT TIME ZONE 'UTC';
 // bucket.ts's currentPeriodKey is UTC too), so a day rolls from the in-progress
 // "today" to a finished bar at UTC midnight. Fire a few minutes past that so the
 // just-completed day is fully in the DB the moment the chart starts showing it.
-const POST_MIDNIGHT_OFFSET_MIN = Math.max(1, Number(process.env.MEMBER_STATS_MIDNIGHT_OFFSET_MIN) || 10);
+const POST_MIDNIGHT_OFFSET_MIN = config.num('MEMBER_STATS_MIDNIGHT_OFFSET_MIN', 10, { min: 1 });
 const FIRST_RUN_DELAY_MS = 90_000; // boot catch-up: fill the current gap immediately
 
 // --- Helpers --------------------------------------------------------------

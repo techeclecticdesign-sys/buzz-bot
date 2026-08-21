@@ -37,10 +37,12 @@ function profileEmbed(player, user) {
     '',
     `💪 Strength **${player.strength}**   🛡️ Defense **${player.defense}**`,
     `🔫 ${weapon.name} (×${weapon.mult})   🦺 ${armor.name} (×${armor.mult})`,
-    prop ? `🏢 ${prop.name} — ${money(prop.perHour)}/hr` : '🏢 No property',
+    prop ? `🏢 ${prop.name} — ${money(prop.perDay)}/day` : '🏢 No property',
   ];
   if (logic.isHospitalised(player)) {
-    lines.push(`\n🏥 **In the hospital** until <t:${Math.floor(new Date(player.hospital_until).getTime() / 1000)}:R>`);
+    const jailed = player.incap_reason === 'jail';
+    const place = jailed ? 'In jail' : 'In the hospital';
+    lines.push(`\n${jailed ? '🚔' : '🏥'} **${place}** — out <t:${Math.floor(new Date(player.hospital_until).getTime() / 1000)}:R>`);
   }
 
   return new EmbedBuilder()
@@ -122,7 +124,7 @@ function shopMenu(player) {
   const opt = (cat, x) => ({
     label: `${x.name} — ${money(x.cost)}`,
     description:
-      cat === 'property' ? `${money(x.perHour)}/hr` : cat === 'weapon' ? `×${x.mult} attack` : `×${x.mult} defense`,
+      cat === 'property' ? `${money(x.perDay)}/day` : cat === 'weapon' ? `×${x.mult} attack` : `×${x.mult} defense`,
     value: `${cat}:${x.id}`,
   });
   const options = [
@@ -159,7 +161,7 @@ const HELP_PAGES = [
     body:
       'Bigger crimes pay more but are riskier, and unlock as you level up. ' +
       'Out-level a crime and it gets safer. Fail and you waste the energy — botch ' +
-      "it badly and you'll spend a few hours in the hospital.",
+      "it badly and you'll spend a few hours in jail.",
   },
   {
     title: 'Combat',
@@ -172,9 +174,9 @@ const HELP_PAGES = [
   {
     title: 'Property',
     body:
-      'Buy a property in `/shop` and it prints cash every hour, up to a full ' +
-      "day's worth. Log in daily and `/collect` (or just `/mprofile`) before it " +
-      'caps out.',
+      'Buy a property in `/shop` and it prints cash every hour, around the ' +
+      'clock. The money lands in your balance automatically — no need to collect ' +
+      'it. Check `/mprofile` any time to see it stacking up.',
   },
   {
     title: 'Stats',

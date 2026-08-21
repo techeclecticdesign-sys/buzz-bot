@@ -11,6 +11,7 @@
 // including the two embeds (invalid entry / over-max) and the under-min kick.
 const { EmbedBuilder } = require('discord.js');
 const failsafe = require('./failsafe');
+const config = require('./config');
 
 // The channel where members type their age. No default: leaving it unset keeps
 // the whole onboarding failsafe dormant (mirrors the advert failsafe being
@@ -31,14 +32,14 @@ const RULES_EMOJI_NAME = (process.env.RULES_EMOJI_NAME || 'rpc').trim();
 // Members who enter an age below MIN_AGE are kicked (matches YAGPDB); MIN_AGE is
 // the only knob for that — set it to the server's minimum. MAX_AGE just bounds
 // the "two-digit age" warning embed.
-const MIN_AGE = Number(process.env.MIN_AGE) || 15;
-const MAX_AGE = Number(process.env.MAX_AGE) || 75;
+const MIN_AGE = config.num('MIN_AGE', 15);
+const MAX_AGE = config.num('MAX_AGE', 75);
 
 // Kicking an under-age member is destructive, so require YAGPDB to have been
 // offline for a sustained period first (rides out a brief reconnect blip). Reuses
 // the advert failsafe's threshold so there is one "how long is a real outage?"
 // knob. The non-destructive role grants act immediately, like the join task.
-const MIN_OFFLINE_MS = (Number(process.env.ADVERT_MIN_OFFLINE_SECS) || 60) * 1000;
+const MIN_OFFLINE_MS = config.num('ADVERT_MIN_OFFLINE_SECS', 60) * 1000;
 
 // Both handlers are dormant until an age-verification channel is configured.
 const configured = !!AGE_VERIFY_CHANNEL_ID;

@@ -16,8 +16,8 @@ function sanitize(name) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async () => {
-  // guild_id is no longer stored per message (single-server bot); take it from
-  // the one guild we're in for the archive directory name.
+  // guild_id isn't stored per message (single-server bot); take it from the one
+  // guild we're in for the archive directory name.
   const guildId = client.guilds.cache.first()?.id ?? 'guild';
 
   // The database stores channel ids only; resolve current names for filenames.

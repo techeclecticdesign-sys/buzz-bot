@@ -12,8 +12,7 @@
     "export-json": "node src/exportJson.js",
     "member-stats": "node src/memberStats.js",
     "member-stats:catchup": "node src/memberStats.js --incremental",
-    "check-links": "node src/checkLinks.js",
-    "migrate:supabase": "node scripts/migrate-to-supabase.js"
+    "check-links": "node src/checkLinks.js"
   },
   "engines": {
     "node": ">=18"

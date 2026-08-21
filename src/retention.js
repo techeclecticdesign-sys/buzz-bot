@@ -1,34 +1,25 @@
-// Database retention — periodically prunes the local `messages` archive so
-// storage stays bounded (Neon's free tier is small). This NEVER deletes
-// anything from Discord — it only trims the bot's own database copy. (The one
-// thing that deletes real Discord posts is the advert failsafe bouncing a
-// rule-breaking advert; removing old ads from Discord is YAGPDB's job, or done
-// manually.)
+// Database retention — prunes the local `messages` archive so storage stays
+// bounded. Never touches Discord; only trims the bot's own DB copy.
 //
 //   Advert channels : pruned after ADVERT_RETENTION_DAYS   (default 365 = 1 year)
 //   Other channels  : pruned after MESSAGE_RETENTION_DAYS  (default 730 = 2 years)
-//   Deleted posts   : purged once past the repost-cooldown window (see below)
+//   Deleted posts   : purged once past the repost-cooldown window
 //
-// A deleted post (deleted_at set) has already been logged to the log channel and
-// removed from Discord, so there's no reason to keep it long-term — and dropping
-// it reclaims any stored group-ad image bytes via ON DELETE CASCADE. We can't
-// purge it immediately, though: the advert failsafe's repost cooldown reads
-// deleted advert rows (getLastDeletedAdvert) for up to the advert's lockout
-// window after it was posted. So deleted rows are kept at least
-// max(lockoutHours) + 1 day, then purged.
-//
-// "Advert channels" are the advert failsafe's configured channels
-// (src/advertConfig.live.js / .test.js). Runs shortly after boot, then daily,
-// and is guarded against overlapping runs. Disable with DB_RETENTION_ENABLED=false.
+// A soft-deleted post (deleted_at set) is already logged + gone from Discord, so
+// it's dropped once older than max(advert lockout) + 1 day — the window the advert
+// failsafe's repost cooldown still reads deleted rows over. Its group-ad image
+// bytes cascade away with it. Runs ~1min after boot, then daily, overlap-guarded.
+// Disable with DB_RETENTION_ENABLED=false.
 const db = require('./db');
 const advertConfig = require('./advertConfig');
+const config = require('./config');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const ENABLED = process.env.DB_RETENTION_ENABLED !== 'false';
+const ENABLED = config.bool('DB_RETENTION_ENABLED', true);
 // Clamped to ≥1: a negative value would put the cutoff in the future and prune
 // the entire archive on the next tick.
-const ADVERT_RETENTION_DAYS = Math.max(1, Number(process.env.ADVERT_RETENTION_DAYS) || 365);
-const OTHER_RETENTION_DAYS = Math.max(1, Number(process.env.MESSAGE_RETENTION_DAYS) || 730);
+const ADVERT_RETENTION_DAYS = config.num('ADVERT_RETENTION_DAYS', 365, { min: 1 });
+const OTHER_RETENTION_DAYS = config.num('MESSAGE_RETENTION_DAYS', 730, { min: 1 });
 // How long a soft-deleted row is kept. The floor is the longest advert lockout
 // (so the repost cooldown never loses the row it needs) plus a day of margin;
 // DELETED_RETENTION_DAYS can raise it but never drop below that floor.
@@ -38,7 +29,7 @@ const MAX_LOCKOUT_HOURS = Math.max(
 );
 const DELETED_KEEP_MS = Math.max(
   MAX_LOCKOUT_HOURS * 60 * 60 * 1000 + DAY_MS,
-  (Number(process.env.DELETED_RETENTION_DAYS) || 0) * DAY_MS,
+  config.num('DELETED_RETENTION_DAYS', 0) * DAY_MS,
 );
 const INTERVAL_MS = DAY_MS; // prune once a day
 const FIRST_RUN_DELAY_MS = 60_000; // let startup work settle first

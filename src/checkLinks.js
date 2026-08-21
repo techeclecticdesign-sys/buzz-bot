@@ -13,6 +13,8 @@ require('dotenv').config();
 const { Client, Events, GatewayIntentBits } = require('discord.js');
 const db = require('./db');
 const { pool } = db;
+const infractionSticky = require('./infractionSticky');
+const config = require('./config');
 
 // Grace window (hours) between first warning an author about a dead link and
 // deleting the post if it's still dead. 0 disables auto-deletion (warn/report
@@ -20,22 +22,14 @@ const { pool } = db;
 // post is never removed without the author having been warned first.
 const GRACE_HOURS = Math.max(0, Number(process.env.LINK_CHECK_GRACE_HOURS ?? 24));
 
-const configured = new Set(
-  (process.env.LINK_CHECK_CHANNELS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-);
+const configured = new Set(config.idList('LINK_CHECK_CHANNELS'));
 // When nothing is configured the feature is dormant: the standalone script
 // errors out (below), and the scheduled path simply never arms.
 const CONFIGURED = configured.size > 0;
 
-// discord.gg/CODE, discord.com/invite/CODE, discordapp.com/invite/CODE.
-// Codes are case-sensitive, so the captured code is never lowercased. The
-// code class matches discord.js's own invite resolver ([\w-], so underscores
-// count) but must end on a word character, so adjacent prose punctuation
-// ("discord.gg/abc- best server!") can't leak into the code and turn a good
-// invite into a false dead flag.
+// Matches discord.gg/CODE and discord(app).com/invite/CODE. Codes are
+// case-sensitive (never lowercased) and must end on a word char, so trailing prose
+// punctuation can't leak in and turn a good invite into a false dead flag.
 const INVITE_RE =
   /(?:https?:\/\/)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com\/invite)\/([\w-]*\w)/gi;
 
@@ -43,15 +37,10 @@ const INVITE_RE =
 // second keeps a big scan well under it (discord.js still queues any 429s).
 const DELAY_MS = 1000;
 
-// Invisible marker (U+2063 INVISIBLE SEPARATOR ×3) appended to a notify-channel
-// ping to tell YAGPDB's #rule_infractions counter "log this as an infraction."
-// It renders as nothing for members, and no other logger-bot message emits
-// U+2063, so its mere presence is an unambiguous signal. YAGPDB matches it with
-// the ASCII-safe regexp `\x{2063}` (see rpc-yagpdb/infractions_sticky) — neither
-// codebase keeps a literal invisible character in source. Only first-sighting
-// duplicate-server pings carry it; dead-link pings deliberately omit it, so they
-// notify the channel WITHOUT ever raising the member's infraction count.
-const INFRACTION_MARKER = String.fromCodePoint(0x2063, 0x2063, 0x2063);
+// This bot's pings don't feed YAGPDB's infraction count (its triggers skip bot
+// messages). Duplicate-server offenses are still enforced (warn, then delete the
+// extra copy after the grace window); they just aren't counted toward YAGPDB's
+// 14-day advert ban, which lives in YAGPDB's own database.
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -136,6 +125,53 @@ async function refreshCurrentPosts(client, rows) {
 
 const postTime = (row) => (row.created_at ? new Date(row.created_at).getTime() : 0);
 
+// Jump link to a post + how to address its author (mention if we have the id).
+// Shared by both sweeps so wording stays identical.
+const jumpLink = (guildId, row) => `https://discord.com/channels/${guildId}/${row.channel_id}/${row.id}`;
+const mention = (row, fallback) => (row.author_id ? `<@${row.author_id}>` : (row.author_tag ?? fallback));
+
+// Resolve one invite code to 'alive' | 'dead' | 'error'. 'dead' is returned ONLY
+// for a genuine Unknown Invite (404 / 10006); every other failure is 'error' —
+// transient, and never treated as dead, so a network blip or rate limit can never
+// drive a deletion. Same classification the discovery sweep's inline loop uses.
+async function resolveCode(client, code) {
+  try {
+    await client.fetchInvite(code);
+    return 'alive';
+  } catch (err) {
+    if (err.code === 10006 || err.status === 404) return 'dead';
+    return 'error';
+  }
+}
+
+// One warn/enforce entry per post that still contains a dead code. `deadline` is
+// the tail of the sentence ("within N hours…" vs "as soon as you can"). Shared by
+// both sweeps so the ping text and per-post grouping stay identical.
+function buildDeadEntries(postsByCode, status, guildId, deadline) {
+  const deadPosts = new Map(); // post id -> { row, count }
+  for (const [code, posts] of postsByCode) {
+    if (status.get(code) !== 'dead') continue;
+    for (const row of posts) {
+      const entry = deadPosts.get(row.id) ?? { row, count: 0 };
+      entry.count++;
+      deadPosts.set(row.id, entry);
+    }
+  }
+  return [...deadPosts.values()].map(({ row, count }) => {
+    const where = `<#${row.channel_id}>`;
+    const what =
+      count === 1
+        ? `your link in ${where} has expired. Please update it with a valid link`
+        : `${count} of your links in ${where} have expired. Please update them with valid links`;
+    return {
+      row,
+      warn:
+        `Hi ${mention(row, 'there')}, it looks like ${what} ${deadline}. ` +
+        `For your convenience, [here is a link to your post](${jumpLink(guildId, row)}). Thank you!`,
+    };
+  });
+}
+
 // Run one offense type through the warn→grace→delete pipeline. `entries` is a
 // list of { row, warn } (pre-built message strings); `reason` keys the
 // persisted grace clock so different offenses track independently. Posts past
@@ -146,7 +182,7 @@ async function enforce(
   client,
   channel,
   entries,
-  { reason, autoDelete, graceMs, counts = false, preserveIds = [] }
+  { reason, autoDelete, graceMs, preserveIds = [] }
 ) {
   const ids = entries.map((e) => e.row.id);
   const flags = await db.getFlaggedPosts(ids, reason);
@@ -176,12 +212,9 @@ async function enforce(
     if (firstSighting) await db.flagPost(row.id, reason, row.channel_id, row.author_id);
     if (!firstSighting) continue;
     try {
-      // Countable offenses (duplicates) carry the invisible marker on the FIRST
-      // ping only, so YAGPDB logs exactly one infraction per offense. Dead-link
-      // pings (counts=false) never carry it, so they notify without ever
-      // incrementing the count.
-      const content = counts && firstSighting ? warn + INFRACTION_MARKER : warn;
-      await channel.send({ content, allowedMentions: { parse: ['users'] } });
+      const sent = await channel.send({ content: warn, allowedMentions: { parse: ['users'] } });
+      // Record the ping for our own expiry sweep (YAGPDB's expiry skips bot posts).
+      if (sent) await db.recordInfractionPost(sent.id, sent.channelId).catch(() => {});
       warned++;
     } catch (err) {
       console.error(`  ! notify failed for post ${row.id}: ${err.message}`);
@@ -204,8 +237,8 @@ async function runLinkCheck(client) {
   }
   console.log('[check-links] resolving channels.');
 
-  // guild_id is no longer stored per message (single-server bot); take it from
-  // the one guild we're in to build jump links.
+  // guild_id isn't stored per message (single-server bot); take it from the one
+  // guild we're in to build jump links.
   const guildId = client.guilds.cache.first()?.id;
 
   // Expand the configured IDs into concrete message-holding channel ids, and
@@ -297,12 +330,9 @@ async function runLinkCheck(client) {
   }
   if (codes.length) process.stdout.write('\n');
 
-  // Outage guard: during a Discord outage invite lookups fail across the
-  // board — including good links coming back "Unknown Invite" (seen in the
-  // July 2026 outage). When three quarters or more of the lookups fail (dead
-  // and unverified both count, since an outage produces both), assume Discord
-  // is broken rather than the links: the report still prints below, but no
-  // notifications are posted.
+  // Outage guard: during a Discord outage, lookups fail across the board (even good
+  // links return "Unknown Invite"). If ≥¾ of lookups fail, assume Discord is broken,
+  // not the links: the report still prints, but no notifications are posted.
   let failedLookups = 0;
   for (const s of status.values()) if (s !== 'alive') failedLookups++;
   const outageSuspected = codes.length > 0 && failedLookups / codes.length >= 3 / 4;
@@ -375,36 +405,12 @@ async function runLinkCheck(client) {
     } else {
       const graceMs = GRACE_HOURS * 60 * 60 * 1000;
       const autoDelete = GRACE_HOURS > 0;
-      const jump = (row) => `https://discord.com/channels/${guildId}/${row.channel_id}/${row.id}`;
-      const mention = (row, fallback) =>
-        row.author_id ? `<@${row.author_id}>` : (row.author_tag ?? fallback);
       const deadline = autoDelete
         ? `within ${GRACE_HOURS} hours or it will be removed`
         : 'as soon as you can';
 
       // --- Dead links: one entry per post with a dead invite ---
-      const deadPosts = new Map(); // post id -> { row, count }
-      for (const [code, posts] of postsByCode) {
-        if (status.get(code) !== 'dead') continue;
-        for (const row of posts) {
-          const entry = deadPosts.get(row.id) ?? { row, count: 0 };
-          entry.count++;
-          deadPosts.set(row.id, entry);
-        }
-      }
-      const deadEntries = [...deadPosts.values()].map(({ row, count }) => {
-        const where = `<#${row.channel_id}>`;
-        const what =
-          count === 1
-            ? `your link in ${where} has expired. Please update it with a valid link`
-            : `${count} of your links in ${where} have expired. Please update them with valid links`;
-        return {
-          row,
-          warn:
-            `Hi ${mention(row, 'there')}, it looks like ${what} ${deadline}. ` +
-            `For your convenience, [here is a link to your post](${jump(row)}). Thank you!`,
-        };
-      });
+      const deadEntries = buildDeadEntries(postsByCode, status, guildId, deadline);
 
       // --- Duplicate servers: a live server advertised in more than one channel.
       // Group live invites by their resolved guild id (so different invite codes
@@ -433,13 +439,13 @@ async function runLinkCheck(client) {
               `Hi ${mention(row, 'there')}, your server is advertised in more than one channel. ` +
               `Group servers may only be advertised in one channel at a time, so please remove ` +
               `this post in <#${row.channel_id}> ${deadline} — your more recent post in ` +
-              `<#${keeper.channel_id}> can stay. [Here is a link to this post](${jump(row)}). Thank you!`,
+              `<#${keeper.channel_id}> can stay. [Here is a link to this post](${jumpLink(guildId, row)}). Thank you!`,
           });
         }
       }
 
-      // Dead links notify only (no `counts`) — they must never raise a member's
-      // infraction count. Duplicate-server offenses do count (marker on first flag).
+      // Both notify then delete after grace. Neither raises a YAGPDB infraction
+      // count (YAGPDB can't see our bot posts — see the note at the top).
       const dead = await enforce(client, channel, deadEntries, {
         reason: 'dead_link',
         autoDelete,
@@ -450,7 +456,6 @@ async function runLinkCheck(client) {
         reason: 'dup_server',
         autoDelete,
         graceMs,
-        counts: true,
         preserveIds: unverifiedIds,
       });
       console.log(
@@ -458,20 +463,121 @@ async function runLinkCheck(client) {
           `dead links ${dead.warned} warned / ${dead.deleted} removed; ` +
           `duplicate servers ${dup.warned} warned / ${dup.deleted} removed.`
       );
+      // Re-stick the sticky under this sweep's pings (once per sweep, only when we
+      // posted). YAGPDB won't — its triggers skip bot posts.
+      if (dead.warned + dup.warned > 0) await infractionSticky.reassertBelow(channel);
     }
   }
 }
 
+// --- Hourly pending re-check -------------------------------------------------
+// runLinkCheck is the daily DISCOVERY sweep (expensive: one lookup per code). This
+// cheap hourly pass re-tests ONLY the already-flagged `dead_link` posts so a fixed
+// link clears and a post past its grace window is removed without waiting a day. It
+// scans no channels and never issues a first warning (discovery did that), reusing
+// enforce(). dup_server is left to the daily sweep (it needs the cross-channel
+// keeper picture this pass doesn't gather).
+async function runPendingLinkRecheck(client) {
+  if (!CONFIGURED) return;
+  const graceMs = GRACE_HOURS * 60 * 60 * 1000;
+  const autoDelete = GRACE_HOURS > 0;
+  // With deletion off there's nothing time-sensitive to do between daily sweeps:
+  // a fixed link still clears on the next daily pass, and nothing is ever removed.
+  if (!autoDelete) return;
+
+  const flagged = await db.getFlaggedPostsByReason('dead_link');
+  if (!flagged.length) return;
+
+  const guildId = client.guilds.cache.first()?.id;
+
+  // Re-validate just the flagged posts against live Discord. This refreshes the
+  // archived content, marks any now-deleted post, and returns posts we couldn't
+  // read as unverified (their flag is preserved rather than cleared).
+  const seedRows = flagged.map((f) => ({
+    id: f.message_id,
+    channel_id: f.channel_id,
+    author_id: f.author_id,
+  }));
+  const { rows, unverifiedIds } = await refreshCurrentPosts(client, seedRows);
+
+  // Look up only the codes these posts still contain (one throttled lookup each).
+  const postsByCode = new Map();
+  for (const row of rows) {
+    const codes = new Set([...row.content.matchAll(INVITE_RE)].map((m) => m[1]));
+    for (const code of codes) {
+      if (!postsByCode.has(code)) postsByCode.set(code, []);
+      postsByCode.get(code).push(row);
+    }
+  }
+  const codes = [...postsByCode.keys()];
+  const status = new Map();
+  for (let i = 0; i < codes.length; i++) {
+    status.set(codes[i], await resolveCode(client, codes[i]));
+    if (i < codes.length - 1) await sleep(DELAY_MS);
+  }
+
+  // Preserve the flag on any post whose lookup errored this run (transient / rate
+  // limit / outage) so a temporary failure never clears the grace clock or lets
+  // the post drop out of the "still dead" set. A real outage makes every lookup
+  // 'error', so nothing is deleted — no separate outage guard is needed here (the
+  // discovery sweep needs one only because it decides on many codes at once).
+  const preserveIds = [...unverifiedIds];
+  for (const [code, posts] of postsByCode) {
+    if (status.get(code) === 'error') for (const r of posts) preserveIds.push(r.id);
+  }
+
+  // The notify channel is only needed to warn a first-sighting — which shouldn't
+  // happen here since every post already carries a flag — but fetch it so the rare
+  // recovered-flag case still lands correctly (and the sticky can be reasserted).
+  const notifyChannelId = (process.env.LINK_CHECK_NOTIFY_CHANNEL_ID || '').trim();
+  const channel = notifyChannelId
+    ? await client.channels.fetch(notifyChannelId).catch(() => null)
+    : null;
+
+  // Outage guard for deletions. The daily sweep uses a fraction-of-failures
+  // heuristic, but that's useless here (the flagged set is mostly-dead by
+  // definition). Instead: a genuinely dead link returns a clean 404, whereas broad
+  // Discord trouble sprays timeouts/500s — and, per the July 2026 outage, can even
+  // make GOOD links answer "Unknown Invite" (→ 'dead'). So if ANY lookup errored
+  // this run, hold off on deletions and retry next hour rather than risk removing a
+  // post the member just fixed. Clearing fixed posts still proceeds — an 'alive'
+  // result is a real success and safe to trust even in a flaky run.
+  const cleanRun = ![...status.values()].includes('error');
+  const deadline = `within ${GRACE_HOURS} hours or it will be removed`;
+  const deadEntries = buildDeadEntries(postsByCode, status, guildId, deadline);
+  const dead = await enforce(client, channel, deadEntries, {
+    reason: 'dead_link',
+    autoDelete: autoDelete && cleanRun,
+    graceMs,
+    preserveIds,
+  });
+  if (dead.warned + dead.deleted > 0) {
+    console.log(
+      `[check-links] pending re-check: ${flagged.length} tracked, ` +
+        `${dead.warned} warned / ${dead.deleted} removed.`
+    );
+    if (dead.warned > 0 && channel) await infractionSticky.reassertBelow(channel);
+  } else if (!cleanRun) {
+    console.warn(
+      `[check-links] pending re-check: held deletions this run (${flagged.length} tracked) — ` +
+        'a lookup errored, so Discord may be flaky. Will retry next cycle.'
+    );
+  }
+}
+
 // --- Daily in-process scheduler (for hosts with no cron, e.g. Wispbyte) ---
-// Fires a sweep once a day, at TARGET_HOUR UTC, reusing the live bot's client.
-// A wall-clock target (not a 24h-from-boot interval) plus an in-memory
-// "already ran today" guard keeps it to one run per calendar day even if the
-// bot restarts — important because a notify run pings authors, so we must not
-// re-run it several times a day. Set LINK_CHECK_HOUR to change the hour.
-const TARGET_HOUR = Math.min(23, Math.max(0, Number(process.env.LINK_CHECK_HOUR) || 4));
+// Fires once a day at TARGET_HOUR UTC. A wall-clock target + an "already ran today"
+// guard keep it to one run per calendar day across restarts (a notify run pings
+// authors, so it must not re-fire). Set LINK_CHECK_HOUR to change the hour.
+const TARGET_HOUR = config.num('LINK_CHECK_HOUR', 4, { min: 0, max: 23 });
 const POLL_MS = 30 * 60 * 1000; // check the clock twice an hour
+// Hourly pending re-check cadence. Clamped to at least 15 min so it can't be set
+// so tight it hammers the invite-lookup rate limit. Set LINK_CHECK_PENDING_MINS.
+const PENDING_POLL_MS =
+  config.num('LINK_CHECK_PENDING_MINS', 60, { min: 15 }) * 60 * 1000;
 let lastRunDate = null; // 'YYYY-MM-DD' of the last completed sweep
-let running = false;
+let running = false; // a full discovery sweep is in progress
+let pendingRunning = false; // an hourly pending re-check is in progress
 
 function scheduleLinkCheck(client) {
   if (!CONFIGURED) {
@@ -479,7 +585,7 @@ function scheduleLinkCheck(client) {
     return;
   }
   const tick = async () => {
-    if (running) return;
+    if (running || pendingRunning) return; // never overlap the two throttled passes
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
     if (now.getUTCHours() !== TARGET_HOUR || lastRunDate === today) return;
@@ -494,6 +600,23 @@ function scheduleLinkCheck(client) {
     }
   };
   setInterval(tick, POLL_MS).unref?.();
+
+  // Hourly pending re-check (only useful when grace deletion is on); shares the
+  // guards above so it never overlaps the daily sweep or itself.
+  if (GRACE_HOURS > 0) {
+    const pendingTick = async () => {
+      if (running || pendingRunning) return;
+      pendingRunning = true;
+      try {
+        await runPendingLinkRecheck(client);
+      } catch (err) {
+        console.error('[check-links] pending re-check failed:', err.message);
+      } finally {
+        pendingRunning = false;
+      }
+    };
+    setInterval(pendingTick, PENDING_POLL_MS).unref?.();
+  }
   const notify = (process.env.LINK_CHECK_NOTIFY_CHANNEL_ID || '').trim();
   const enforcement =
     GRACE_HOURS > 0 && notify
@@ -503,13 +626,15 @@ function scheduleLinkCheck(client) {
         : notify
           ? 'warn only (LINK_CHECK_GRACE_HOURS=0)'
           : 'report only';
+  const pending =
+    GRACE_HOURS > 0 ? `; pending re-check every ${PENDING_POLL_MS / 60000} min` : '';
   console.log(
     `[check-links] armed — daily around ${String(TARGET_HOUR).padStart(2, '0')}:00 UTC ` +
-      `(${configured.size} target(s); ${enforcement}).`
+      `(${configured.size} target(s); ${enforcement}${pending}).`
   );
 }
 
-module.exports = { runLinkCheck, scheduleLinkCheck, CONFIGURED };
+module.exports = { runLinkCheck, runPendingLinkRecheck, scheduleLinkCheck, CONFIGURED };
 
 // Standalone entrypoint: `npm run check-links`. Owns its own client and
 // process, so it logs in, runs one sweep, then tears everything down.

@@ -2,6 +2,7 @@
 // connection budget). All mutations go through a row-locked transaction so the
 // economy can't be raced/duped — the reason this is a real bot, not YAGPDB.
 const { pool } = require('../db');
+const data = require('./gameData');
 
 async function init() {
   await pool.query(`
@@ -19,6 +20,7 @@ async function init() {
       hp                    DOUBLE PRECISION NOT NULL DEFAULT 100,
       hp_updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
       hospital_until        TIMESTAMPTZ,
+      incap_reason          TEXT,
       weapon_id             TEXT NOT NULL DEFAULT 'fists',
       armor_id              TEXT NOT NULL DEFAULT 'none',
       property_id           TEXT,
@@ -31,6 +33,9 @@ async function init() {
   // This bot serves one server, so guild_id was redundant; drop it from existing
   // databases (it's a plain column, never part of the PK, so this is clean).
   await pool.query('ALTER TABLE game_players DROP COLUMN IF EXISTS guild_id;');
+  // Cosmetic label for why a player is out of action ('jail' = botched crime,
+  // 'hospital' = combat KO). Same timer/behavior either way; only wording differs.
+  await pool.query('ALTER TABLE game_players ADD COLUMN IF NOT EXISTS incap_reason TEXT;');
   await pool.query(`
     CREATE TABLE IF NOT EXISTS game_attack_log (
       id          BIGSERIAL PRIMARY KEY,
@@ -45,7 +50,7 @@ async function init() {
 
 const COLS = [
   'level', 'exp', 'cash', 'energy', 'energy_updated_at', 'strength', 'defense',
-  'trains_today', 'train_day', 'hp', 'hp_updated_at', 'hospital_until', 'weapon_id',
+  'trains_today', 'train_day', 'hp', 'hp_updated_at', 'hospital_until', 'incap_reason', 'weapon_id',
   'armor_id', 'property_id', 'property_collected_at', 'respect', 'last_attack_at',
 ];
 
@@ -120,14 +125,31 @@ async function playerExists(userId) {
   return rows.length > 0;
 }
 
-// Read-only leaderboard by net-ish worth (cash). No lock.
+// Read-only leaderboard by *live* cash — stored cash plus property income that
+// has accrued since it was last banked (continuous, uncapped, mirrors what
+// logic.materialize would bank). Computed in SQL so ranking/LIMIT stay exact
+// even for players who haven't logged in. perDay depends on the owned property,
+// so build a CASE from the game data (ids/rates are our own constants — safe).
+// Must mirror logic.propertyIncome(): income is per DAY, accrued by the fraction
+// of a day elapsed (86400 s), so keep this in sync with that calc.
+const PER_DAY_CASE = `CASE ${data.PROPERTIES.map((p) => `WHEN property_id = '${p.id}' THEN ${p.perDay}`).join(' ')} ELSE 0 END`;
+const LIVE_CASH = `(cash + FLOOR(GREATEST(0, EXTRACT(EPOCH FROM (now() - COALESCE(property_collected_at, now()))) / 86400.0) * (${PER_DAY_CASE})))::BIGINT`;
 async function top(limit = 10) {
   const { rows } = await pool.query(
-    `SELECT user_id, level, cash, respect FROM game_players
-     ORDER BY cash DESC, level DESC LIMIT $1`,
+    `SELECT user_id, level, respect, ${LIVE_CASH} AS cash FROM game_players
+     ORDER BY ${LIVE_CASH} DESC, level DESC LIMIT $1`,
     [limit]
   );
   return rows;
 }
 
-module.exports = { init, savePlayer, withPlayer, withTwoPlayers, logAttack, top, playerExists };
+// Wipe the entire game: every player and the attack history. Staff-gated at the
+// command layer. Returns how many player rows were removed. Truncating in one
+// statement keeps it atomic and resets the attack-log sequence.
+async function resetAll() {
+  const { rows } = await pool.query('SELECT count(*)::int AS n FROM game_players');
+  await pool.query('TRUNCATE game_players, game_attack_log RESTART IDENTITY');
+  return rows[0].n;
+}
+
+module.exports = { init, savePlayer, withPlayer, withTwoPlayers, logAttack, top, playerExists, resetAll };

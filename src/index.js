@@ -7,42 +7,36 @@ const {
   Partials,
   EmbedBuilder,
   AttachmentBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   MessageFlags,
 } = require('discord.js');
+const config = require('./config');
+config.validate();
 const db = require('./db');
 const jsonArchive = require('./jsonArchive');
 const { isIgnoredMessage } = require('./ignoredChannels');
 const failsafe = require('./failsafe');
 const advertFailsafe = require('./advertFailsafe');
+const infractionSticky = require('./infractionSticky');
+const infractionExpiry = require('./infractionExpiry');
 const onboardingFailsafe = require('./onboardingFailsafe');
 const advertConfig = require('./advertConfig');
 const advertImages = require('./advertImages');
-const { reactionSummary } = require('./reactions');
 const retention = require('./retention');
 const linkCheck = require('./checkLinks');
 const memberStats = require('./memberStatsCollector');
 const game = require('./game');
 const polls = require('./polls');
+const { sleep } = require('./util');
+const { DESC_MAX, truncate, splitTruncate, attachmentList } = require('./format');
+const { memberJoinEmbed, memberLeaveEmbed, buildSettingsMessage } = require('./embeds');
+const { findDeleteExecutor, primeAuditCounts } = require('./auditLog');
+const memberTracking = require('./memberTracking');
+const { memberRoleIds, queueMemberChange } = memberTracking;
+const commands = require('./commands');
+const { PREFIX, NICK_PREFIX, handleCommand, handleNickPrefixCommand } = commands;
+const advertSyncFactory = require('./advertSync');
 
-const TOKEN = process.env.DISCORD_TOKEN;
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
-const IGNORE_BOTS = process.env.IGNORE_BOTS === 'true';
-// Logging (message archive + edit/delete embeds + member/name tracking) is
-// optional so the bot can run game-only. When off, LOG_CHANNEL_ID and the
-// privileged message intents aren't required.
-const LOGGING_ENABLED = process.env.LOGGING_ENABLED !== 'false';
-
-if (!TOKEN || !process.env.DATABASE_URL) {
-  console.error('Missing required env vars: DISCORD_TOKEN, DATABASE_URL');
-  process.exit(1);
-}
-if (LOGGING_ENABLED && !LOG_CHANNEL_ID) {
-  console.error('LOGGING_ENABLED but LOG_CHANNEL_ID is unset — set it, or set LOGGING_ENABLED=false.');
-  process.exit(1);
-}
+const { TOKEN, LOG_CHANNEL_ID, IGNORE_BOTS, LOGGING_ENABLED } = config;
 
 // Intents are requested per enabled feature, so a game-only bot needs no
 // privileged intents. Logging and the failsafe both read messages/members; the
@@ -66,69 +60,22 @@ if (failsafe.ENABLED) {
 
 const client = new Client({
   intents,
-  // Partials are required so update/delete events still fire for messages
-  // that aren't in discord.js's in-memory cache — the whole point of this bot.
-  // GuildMember lets member-update events fire for uncached members too, and
-  // Reaction/Message let the rules reaction fire on the (old, uncached) rules
-  // message.
+  // Partials make update/delete events fire for uncached messages, member-update
+  // for uncached members, and the rules reaction fire on the old rules message.
   partials: [Partials.Message, Partials.Channel, Partials.GuildMember, Partials.Reaction],
 });
 
-function truncate(str, max) {
-  if (!str) return str;
-  return str.length > max ? str.slice(0, max - 1) + '…' : str;
-}
+// Advert channels whose posts' reactions we keep mirrored for rpc-web. Empty
+// when no advert config is set (test/game-only), which disables the sync.
+const ADVERT_CHANNEL_SET = new Set(advertConfig.ALL_ADVERT_CHANNELS);
 
-function fieldText(content) {
-  return truncate(content, 1024) || '*(no text content)*';
-}
-
-// Discord caps an embed description at 4096 chars (and the whole embed at 6000).
-// We budget content into the description against a limit kept a little below
-// 4096 so the trailing ellipsis, surrogate-pair miscounts, or any off-by-one can
-// never push a real post over the cap and make Discord reject the embed — which
-// would drop the log entry entirely. Losing the post is the one thing we won't
-// risk, so we truncate conservatively instead.
-const DESC_LIMIT = 4096;
-const DESC_SAFETY_BUFFER = 96;
-const DESC_MAX = DESC_LIMIT - DESC_SAFETY_BUFFER; // 4000
-
-// Fit `before` and `after` into `budget` chars total, truncating equally: each
-// may use up to half the budget, and whatever one leaves unused is handed to the
-// other. Only an oversized side loses text, so a short `before` is never cut to
-// match a long `after`. The two returned strings always sum to <= budget.
-function splitTruncate(before, after, budget) {
-  if (budget <= 0) return ['', ''];
-  if (before.length + after.length <= budget) return [before, after];
-  const half = Math.floor(budget / 2);
-  let beforeMax, afterMax;
-  if (before.length <= half) {
-    beforeMax = before.length;
-    afterMax = budget - before.length;
-  } else if (after.length <= half) {
-    afterMax = after.length;
-    beforeMax = budget - after.length;
-  } else {
-    beforeMax = half;
-    afterMax = budget - half;
-  }
-  return [truncate(before, beforeMax), truncate(after, afterMax)];
-}
-
-function attachmentList(attachments) {
-  if (!attachments?.length) return null;
-  // Truncate by whole lines so a markdown link is never cut in half.
-  let out = '';
-  for (const a of attachments) {
-    const line = `[${a.name}](${a.url})`;
-    if (out.length + line.length + 3 > 1024) {
-      out += '\n…';
-      break;
-    }
-    out += (out ? '\n' : '') + line;
-  }
-  return out;
-}
+// Member/user diff trackers and advert sync close over the client and the log
+// sender, so they're wired once here (sendLog is a hoisted function below).
+const { trackMemberChanges, trackUserNameChanges } = memberTracking.create({ sendLog, client });
+const advertSync = advertSyncFactory.create({
+  loggingEnabled: LOGGING_ENABLED,
+  advertChannelSet: ADVERT_CHANNEL_SET,
+});
 
 async function sendLog(payload) {
   try {
@@ -143,57 +90,6 @@ async function sendLog(payload) {
   }
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Discord's delete event never says who deleted. The audit log does — but a
-// mod's repeated deletes of the same user/channel just bump a counter on one
-// entry, so we track per-entry counts to catch increments. No entry at all
-// means EITHER the author self-deleted OR a bot deleted it: Discord audits
-// neither (discord-api-docs #1611), so the two are indistinguishable here.
-const auditCounts = new Map();
-
-// Cap on retained audit-entry counters, evicting the least-recently-updated
-// first. Deleting before re-setting moves an updated key to the back of the
-// Map's insertion order, so an entry still being incremented (a mod repeatedly
-// deleting the same user/channel) is never the one evicted.
-const AUDIT_COUNTS_CAP = 1000;
-function rememberAuditCount(id, count) {
-  auditCounts.delete(id);
-  auditCounts.set(id, count);
-  if (auditCounts.size > AUDIT_COUNTS_CAP) {
-    const excess = auditCounts.size - AUDIT_COUNTS_CAP;
-    let i = 0;
-    for (const key of auditCounts.keys()) {
-      auditCounts.delete(key);
-      if (++i >= excess) break;
-    }
-  }
-}
-
-async function findDeleteExecutor(guild, authorId, channelId) {
-  if (!guild || !authorId) return undefined; // can't match → unknown
-  try {
-    // The audit entry can lag the gateway event by several seconds, so wait
-    // long enough that a real mod-delete entry has landed before we conclude
-    // there's no entry (which we can't tell apart from an author/bot delete).
-    await sleep(4500);
-    const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MessageDelete, limit: 10 });
-    for (const entry of logs.entries.values()) {
-      const count = entry.extra?.count ?? 1;
-      const prev = auditCounts.get(entry.id);
-      rememberAuditCount(entry.id, count);
-      if (entry.targetId !== authorId || entry.extra?.channel?.id !== channelId) continue;
-      const fresh = Date.now() - entry.createdTimestamp < 10_000;
-      const incremented = prev !== undefined && count > prev;
-      if (fresh || incremented) return entry.executor;
-    }
-    return null; // no matching entry → author self-delete or bot delete (Discord audits neither)
-  } catch (err) {
-    console.error('[audit] fetch failed (missing View Audit Log permission?):', err.message);
-    return undefined;
-  }
-}
-
 function shouldTrack(message) {
   if (!message.guildId) return false; // ignore DMs
   if (message.channelId === LOG_CHANNEL_ID) return false; // avoid feedback loops
@@ -203,678 +99,15 @@ function shouldTrack(message) {
   return true;
 }
 
-const PREFIX = 'c!';
-const NICK_PREFIX = '>>';
-
-function envIds(name) {
-  return (process.env[name] || '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean);
-}
-
-// Roles allowed to run `c!threadkill`.
-const MOD_ROLES = envIds('MOD_ROLES');
-const MEMBER_LIST_CAP = 200;
-
-// Advert channels whose posts' reactions we keep mirrored for rpc-web. Empty
-// when no advert config is set (test/game-only), which disables the sync.
-const ADVERT_CHANNEL_SET = new Set(advertConfig.ALL_ADVERT_CHANNELS);
-
-// A member's role ids minus @everyone (whose id equals the guild id), sorted so
-// two states compare equal regardless of order.
-function memberRoleIds(member) {
-  return [...member.roles.cache.keys()].filter((id) => id !== member.guild.id).sort();
-}
-
-// A no-arg guild.members.fetch() goes out over the gateway as opcode 8 (Request
-// Guild Members) to chunk the whole member list, which Discord rate-limits hard
-// ("Request with opcode 8 was rate limited"). Startup already primes the full
-// cache and the GuildMembers intent keeps it live, so re-fetching on every
-// command is redundant *and* the thing that trips the limit. Only refetch when
-// the cache is genuinely incomplete, and dedupe concurrent/rapid callers behind
-// one in-flight fetch so a burst of commands can't stack opcode-8 requests.
-const memberFetches = new Map(); // guild.id -> { promise, at }
-const MEMBER_REFETCH_COOLDOWN_MS = 60_000;
-async function ensureGuildMembers(guild) {
-  if (guild.members.cache.size >= guild.memberCount) return; // cache complete
-  const existing = memberFetches.get(guild.id);
-  if (existing && Date.now() - existing.at < MEMBER_REFETCH_COOLDOWN_MS) {
-    await existing.promise.catch(() => {});
-    return;
-  }
-  const promise = guild.members.fetch();
-  memberFetches.set(guild.id, { promise, at: Date.now() });
-  try {
-    await promise;
-  } catch (err) {
-    console.warn(`[members] fetch failed for ${guild.name}:`, err.message);
-  }
-}
-
-// `c!members` (no role) shows a server-info card; `c!members @role` lists the
-// members with that role. Both mirror Circle bot's embeds.
-async function handleMembersCommand(message, args) {
-  if (args.length === 0) {
-    await sendServerInfoCard(message);
-    return;
-  }
-
-  // Accept a role mention, a role id, or a (case-insensitive) role name.
-  let role = message.mentions.roles.first();
-  if (!role) {
-    const query = args.join(' ').replace(/^@/, '');
-    role =
-      message.guild.roles.cache.get(query) ??
-      message.guild.roles.cache.find(
-        (r) => r.name.toLowerCase() === query.toLowerCase()
-      );
-  }
-  if (!role) {
-    await message.reply('Role not found. Usage: `c!members` or `c!members @role`');
-    return;
-  }
-
-  // role.members only reflects the member cache; make sure it's complete first.
-  await ensureGuildMembers(message.guild);
-  const withRole = role.members;
-  const listed = [...withRole.values()].slice(0, MEMBER_LIST_CAP);
-  const lines = listed.map((m) => `@${m.user.username} \`${m.id}\``);
-
-  const heading = `Listing ${listed.length} of ${withRole.size} members`;
-  // The member list can exceed an embed's 4096-char description, so split it
-  // into as many embeds as needed; the first carries the heading.
-  const embeds = [];
-  let body = '';
-  const flush = () => {
-    const embed = new EmbedBuilder()
-      .setColor(role.color || 0x5865f2)
-      .setTitle(`Showing members in ${role.name}`)
-      .setDescription(`${embeds.length === 0 ? `${heading}\n\n` : ''}${body || '*none*'}`);
-    if (embeds.length === 0)
-      embed.setAuthor({ name: message.guild.name, iconURL: message.guild.iconURL() ?? undefined });
-    embeds.push(embed);
-    body = '';
-  };
-  for (const line of lines) {
-    // Reserve room for the heading on the first embed.
-    const budget = DESC_MAX - (embeds.length === 0 ? heading.length + 2 : 0);
-    if (body.length + line.length + 1 > budget) flush();
-    body += (body ? '\n' : '') + line;
-  }
-  flush();
-
-  // Up to 10 embeds fit in one message; send in batches to be safe.
-  for (let i = 0; i < embeds.length; i += 10) {
-    await message.channel.send({
-      embeds: embeds.slice(i, i + 10),
-      allowedMentions: { parse: [] },
-    });
-  }
-}
-
-// Server-info card for bare `c!members`: name + icon, member/online/boost counts.
-async function sendServerInfoCard(message) {
-  const guild = message.guild;
-  const icon = guild.iconURL({ size: 512 }) ?? undefined;
-
-  // Discord's own online tally (approximate_presence_count, via ?with_counts).
-  // This matches what other bots report; counting our local presence cache
-  // undercounts because the gateway only delivers a subset of presences.
-  let onlineValue = '—';
-  try {
-    await guild.fetch();
-    if (typeof guild.approximatePresenceCount === 'number')
-      onlineValue = guild.approximatePresenceCount.toLocaleString();
-  } catch (err) {
-    console.warn('[members] could not fetch presence count:', err.message);
-  }
-
-  // A single icon in the author line — matching the reference card. No thumbnail
-  // or full-size image (those produced the extra copies of the spinning icon).
-  const boostTier = guild.premiumTier ? ` (Level ${guild.premiumTier})` : '';
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setAuthor({ name: guild.name, iconURL: icon })
-    .addFields(
-      { name: 'Member Count', value: guild.memberCount.toLocaleString(), inline: true },
-      { name: 'Online Members', value: onlineValue, inline: true },
-      { name: 'Server Boosts', value: `${(guild.premiumSubscriptionCount ?? 0).toLocaleString()}${boostTier}`, inline: true },
-    );
-
-  await message.channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
-}
-
-// `c!threadkill <thread id>` — staff-only. Deletes ONLY threads: a resolved
-// channel is deleted solely when `isThread()` is true, so regular channels are
-// never touched, and a message id (which resolves to no channel) is a no-op.
-async function handleThreadkillCommand(message, args) {
-  const isStaff = MOD_ROLES.length > 0 && message.member?.roles.cache.hasAny(...MOD_ROLES);
-  if (!isStaff) {
-    await message.reply('You do not have permission to use this command.');
-    return;
-  }
-
-  // Accept a raw id or a <#id> channel mention.
-  const id = (args[0] ?? '').match(/\d{5,}/)?.[0];
-  if (!id) {
-    await message.reply('Usage: `c!threadkill <thread id>`');
-    return;
-  }
-
-  let channel = message.guild.channels.cache.get(id) ?? null;
-  if (!channel) {
-    try {
-      channel = await message.guild.channels.fetch(id);
-    } catch {
-      channel = null;
-    }
-  }
-  if (!channel) {
-    await message.reply(`No thread found with id \`${id}\`. Nothing was deleted.`);
-    return;
-  }
-
-  // Hard guard: refuse to delete anything that isn't a thread.
-  if (!channel.isThread()) {
-    await message.reply(
-      `\`${id}\` is **${channel.name ?? 'that channel'}**, which is not a thread. Nothing was deleted.`
-    );
-    return;
-  }
-
-  // Only delete empty threads. Forum/media posts carry a starter message that
-  // shares the thread's id — ignore that; any other message means it's not
-  // empty. This also covers regular threads (which fetch as zero messages when
-  // empty, since their starter lives in the parent channel).
-  try {
-    const recent = await channel.messages.fetch({ limit: 3 });
-    const others = recent.filter((m) => m.id !== channel.id);
-    if (others.size > 0) {
-      await message.reply(
-        `Thread **${channel.name}** (\`${id}\`) is not empty. Nothing was deleted.`
-      );
-      return;
-    }
-  } catch (err) {
-    await message.reply(
-      `Couldn't verify whether thread \`${id}\` is empty: ${err.message}. Nothing was deleted.`
-    );
-    return;
-  }
-
-  const name = channel.name;
-  try {
-    await channel.delete(`c!threadkill by ${message.author.tag} (${message.author.id})`);
-    await message.reply(`Deleted thread **${name}** (\`${id}\`).`);
-  } catch (err) {
-    await message.reply(`Failed to delete thread \`${id}\`: ${err.message}`);
-  }
-}
-
-async function handleCommand(message) {
-  const [cmd, ...args] = message.content.slice(PREFIX.length).trim().split(/\s+/);
-  try {
-    if (cmd.toLowerCase() === 'members') await handleMembersCommand(message, args);
-    else if (cmd.toLowerCase() === 'threadkill') await handleThreadkillCommand(message, args);
-  } catch (err) {
-    console.error(`[command] ${cmd} error:`, err.message);
-  }
-}
-
-// Serialize member-change handling per member. Discord fires a separate
-// guildMemberUpdate for each role change, so a burst (onboarding flows assign
-// several roles back-to-back) can have two handlers in flight diffing against
-// the same stale baseline — double-recording the earlier change. Chaining them
-// per member makes each diff see the previous one's saved state.
-const memberChangeQueues = new Map();
-function queueMemberChange(key, fn) {
-  const prev = memberChangeQueues.get(key) ?? Promise.resolve();
-  const run = prev.then(fn); // prev never rejects (entry swallows below)
-  const entry = run.then(() => {}, () => {}).finally(() => {
-    if (memberChangeQueues.get(key) === entry) memberChangeQueues.delete(key);
-  });
-  memberChangeQueues.set(key, entry);
-  return run; // caller awaits this one and handles any rejection
-}
-
-// Detects nickname and role changes by diffing the incoming member against the
-// last state we stored, then persists the diff and the new baseline. With no
-// prior baseline (a member we've never recorded) we just seed it — we can't
-// know what changed, so we wait for the next change to log it.
-async function trackMemberChanges(member) {
-  const { guild } = member;
-  const tag = member.user.tag;
-  const nickname = member.nickname ?? null;
-  const displayName = member.displayName ?? null;
-  const roleIds = memberRoleIds(member);
-
-  const state = await db.getMemberState(member.id);
-  if (!state) {
-    await db.seedMemberState(member.id, tag, nickname, roleIds, displayName);
-    return;
-  }
-
-  // Nickname changes are always logged; role changes only when enabled. Either
-  // way the DB record is written so >>nicknames / >>roles history stays complete.
-  if ((state.nickname ?? null) !== nickname) {
-    await db.recordNickname(member.id, tag, nickname);
-    await sendLog({ embeds: [nicknameEmbed(member, state.nickname ?? null, nickname)] });
-  }
-
-  const before = new Set(state.role_ids ?? []);
-  const after = new Set(roleIds);
-  const added = [...after].filter((id) => !before.has(id));
-  const removed = [...before].filter((id) => !after.has(id));
-  const embeds = [];
-  for (const id of added) {
-    const name = guild.roles.cache.get(id)?.name ?? null;
-    await db.recordRoleChange(member.id, tag, id, name, 'add');
-    embeds.push(roleChangeEmbed(member, id, name, 'add'));
-  }
-  for (const id of removed) {
-    const name = guild.roles.cache.get(id)?.name ?? null;
-    await db.recordRoleChange(member.id, tag, id, name, 'remove');
-    embeds.push(roleChangeEmbed(member, id, name, 'remove'));
-  }
-  if (embeds.length && (await db.getGuildSettings()).log_role_changes) {
-    // One embed per change; Discord caps a message at 10 embeds, so chunk.
-    for (let i = 0; i < embeds.length; i += 10) {
-      await sendLog({ embeds: embeds.slice(i, i + 10) });
-    }
-  }
-
-  await db.setMemberState(member.id, tag, nickname, roleIds, displayName);
-}
-
-// --- Settings panel (>>settings) ---
-
-// log_to_channel is the master switch for posting to the log channel; the rest
-// describe what's posted when it's on. Message edits/deletes and name changes are
-// always logged; role changes are the one per-type opt-in. All owner-toggled.
-function buildSettingsMessage(settings) {
-  const posting = settings.log_to_channel;
-  const embed = new EmbedBuilder()
-    .setColor(posting ? 0x2ecc71 : 0x95a5a6)
-    .setTitle('Logger settings')
-    .setDescription(
-      `${posting ? '🟢' : '⚪'} **Log channel posting** — ${posting ? 'On' : 'Off'}\n` +
-      (posting
-        ? ''
-        : '_Paused — messages are still archived to the database, but nothing is posted to the log channel until you switch this back on._\n') +
-      '\nWhen posting is on, the log channel receives:\n' +
-      '✅ **Message edits** — always on\n' +
-      '✅ **Message deletions** — always on\n' +
-      '✅ **Name changes** — always on _(nickname, username & display name)_\n' +
-      '✅ **Joins & leaves** — always on\n' +
-      `${settings.log_role_changes ? '🟢' : '⚪'} **Role changes** — ${settings.log_role_changes ? 'On' : 'Off'}`
-    )
-    .setFooter({ text: 'Only the server owner can change these. Tap a switch below to toggle.' });
-
-  const disabled = (id, label) =>
-    new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(ButtonStyle.Success).setDisabled(true);
-
-  const masterRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('settings:toggle:channel')
-      .setLabel(`Log channel posting: ${posting ? 'On' : 'Off'}`)
-      .setStyle(posting ? ButtonStyle.Success : ButtonStyle.Secondary),
-  );
-  const typesRow = new ActionRowBuilder().addComponents(
-    disabled('settings:noop:edits', 'Edits: On'),
-    disabled('settings:noop:deletes', 'Deletions: On'),
-    disabled('settings:noop:names', 'Name changes: On'),
-    new ButtonBuilder()
-      .setCustomId('settings:toggle:role')
-      .setLabel(`Role changes: ${settings.log_role_changes ? 'On' : 'Off'}`)
-      .setStyle(settings.log_role_changes ? ButtonStyle.Success : ButtonStyle.Secondary),
-  );
-  return { embeds: [embed], components: [masterRow, typesRow] };
-}
-
-async function handleSettingsCommand(message) {
-  if (message.guild.ownerId !== message.author.id) {
-    await message.reply('Only the server owner can view or change logger settings.');
-    return;
-  }
-  const settings = await db.getGuildSettings();
-  await message.channel.send(buildSettingsMessage(settings));
-}
-
-// >>failsafe — owner-only readout of YAGPDB detection so the "variants of
-// yagpdb" matching can be verified without waiting for a real outage.
-async function handleFailsafeCommand(message) {
-  if (message.guild.ownerId !== message.author.id) {
-    await message.reply('Only the server owner can view failsafe status.');
-    return;
-  }
-  const s = failsafe.describeStatus(message.guild);
-  const role = message.guild.roles.cache.get(s.roleId);
-  const foundLines = s.found.length
-    ? s.found.map((m) => `• \`${m.user.username}\` (${m.id}) — **${failsafe.statusLabel(m)}**`).join('\n')
-    : '*none detected*';
-
-  const embed = new EmbedBuilder()
-    .setColor(s.active ? 0xe67e22 : 0x2ecc71)
-    .setTitle('Failsafe status')
-    .setDescription(
-      `**Enabled:** ${s.enabled ? 'yes' : 'no — `FAILSAFE_ENABLED=false` (Presence intent not requested)'}\n` +
-      `**YAGPDB bots detected:** ${s.found.length}\n` +
-      `**Any online:** ${s.online.length > 0 ? 'yes' : 'no'}\n` +
-      `**Currently active:** ${s.active
-        ? '🟠 YES — the next member to join will get Age Please'
-        : '🟢 no — YAGPDB is handling joins'}\n\n` +
-      `**Detected bots:**\n${foundLines}\n\n` +
-      `**Age Please role:** ${role ? `${role} \`${role.name}\`` : `\`${s.roleId}\` — ⚠️ *not found*`}\n` +
-      `**Onboarding failsafe:** ${onboardingFailsafe.configured
-        ? `armed (age channel <#${onboardingFailsafe.channelId}>)`
-        : 'inactive — `AGE_VERIFY_CHANNEL_ID` unset'}`
-    )
-    .setFooter({
-      text: s.found.length === 0
-        ? 'No YAGPDB match found — the failsafe would treat it as offline. Check the bot shares this server.'
-        : 'Matches any bot whose name contains “yagpdb”, ignoring the #discriminator.',
-    })
-    .setTimestamp();
-  await message.channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
-}
-
-// Embed helpers for member/name changes. Mentions inside an embed never ping,
-// so these are safe to post without allowedMentions.
-function memberHeader(user) {
-  return `**Member:** <@${user.id}> (\`${user.username}\`)\n**User ID:** ${user.id}`;
-}
-
-function nicknameEmbed(member, before, after) {
-  return new EmbedBuilder()
-    .setColor(0x3498db)
-    .setTitle('Nickname changed')
-    .setThumbnail(member.user.displayAvatarURL())
-    .setDescription(memberHeader(member.user))
-    .addFields(
-      { name: 'Before', value: before ?? '*(none — used username)*', inline: true },
-      { name: 'After', value: after ?? '*(reset to username)*', inline: true }
-    )
-    .setTimestamp();
-}
-
-// One embed per role change, styled after CircleBot's log format: the user's
-// avatar + @username as the author line, a plain-language sentence as the body,
-// and the user ID in the footer next to the timestamp. No title.
-function roleChangeEmbed(member, roleId, roleName, action) {
-  const role = roleName ?? `<@&${roleId}>`;
-  const sentence =
-    action === 'add'
-      ? `<@${member.id}> was given the ${role} role.`
-      : `<@${member.id}> was removed from the ${role} role.`;
-  return new EmbedBuilder()
-    .setColor(action === 'add' ? 0x2ecc71 : 0xe74c3c)
-    .setAuthor({ name: `@${member.user.username}`, iconURL: member.user.displayAvatarURL() })
-    .setDescription(sentence)
-    .setFooter({ text: `User ID: ${member.id}` })
-    .setTimestamp();
-}
-
-// Join/leave embeds, styled after the CircleBot-style card in the reference:
-// @username + avatar author line, a "<@id> has joined/left the server" sentence,
-// an Account Created / Member Count pair, and the user id + timestamp in the
-// footer. `<t:…:f>` renders each viewer's local "June 11, 2018 5:56 PM".
-function memberJoinEmbed(member) {
-  const created = Math.floor(member.user.createdTimestamp / 1000);
-  return new EmbedBuilder()
-    .setColor(0x2ecc71)
-    .setAuthor({ name: `@${member.user.username}`, iconURL: member.user.displayAvatarURL() })
-    .setDescription(`<@${member.id}> has joined the server!`)
-    .addFields(
-      { name: 'Account Created', value: `<t:${created}:f>`, inline: true },
-      { name: 'Member Count', value: member.guild.memberCount.toLocaleString(), inline: true }
-    )
-    .setFooter({ text: `User ID: ${member.id}` })
-    .setTimestamp();
-}
-
-// The inverse of the join card (red). memberCount has already been decremented
-// by the time this fires, so it reflects the post-leave total. A partial/uncached
-// member may lack joinedTimestamp and a complete role list, so both are optional.
-function memberLeaveEmbed(member) {
-  const embed = new EmbedBuilder()
-    .setColor(0xe74c3c)
-    .setAuthor({ name: `@${member.user.username}`, iconURL: member.user.displayAvatarURL() })
-    .setDescription(`<@${member.id}> has left the server.`)
-    .setFooter({ text: `User ID: ${member.id}` })
-    .setTimestamp();
-
-  const joined = member.joinedTimestamp
-    ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:f>`
-    : '*(unknown — not cached)*';
-  embed.addFields(
-    { name: 'Joined Server', value: joined, inline: true },
-    { name: 'Member Count', value: member.guild.memberCount.toLocaleString(), inline: true }
-  );
-
-  // Roles held at the time they left (minus @everyone), when the member was
-  // cached. Handy for spotting whether a verified/staff member left.
-  const roles = member.roles?.cache
-    ? [...member.roles.cache.values()]
-        .filter((r) => r.id !== member.guild.id)
-        .sort((a, b) => b.position - a.position)
-        .map((r) => r.name)
-    : [];
-  if (roles.length)
-    embed.addFields({ name: `Roles (${roles.length})`, value: truncate(roles.join(', '), 1024) });
-
-  return embed;
-}
-
-function profileNameEmbed(user, c) {
-  const embed = new EmbedBuilder()
-    .setColor(0x1abc9c)
-    .setTitle('Account name changed')
-    .setThumbnail(user.displayAvatarURL())
-    .setDescription(memberHeader(user))
-    .setTimestamp();
-  if (c.usernameChanged)
-    embed.addFields({
-      name: 'Username',
-      value: `\`${c.oldUsername ?? '(unknown)'}\` → \`${c.newUsername ?? '(none)'}\``,
-    });
-  if (c.globalChanged)
-    embed.addFields({
-      name: 'Display name',
-      value: `${c.oldGlobal ?? '*(none)*'} → ${c.newGlobal ?? '*(none)*'}`,
-    });
-  return embed;
-}
-
-// Detect account-level name changes — username and display name — which arrive
-// via userUpdate, not guildMemberUpdate. Diffed against stored user_state so a
-// restart never misses one (same reason member_state exists). Always logged.
-async function trackUserNameChanges(user) {
-  const state = await db.getUserState(user.id);
-  const newUsername = user.username ?? null;
-  const newGlobal = user.globalName ?? null;
-
-  if (!state) {
-    await db.seedUserState(user.id, newUsername, newGlobal);
-    return;
-  }
-
-  const oldUsername = state.username ?? null;
-  const oldGlobal = state.global_name ?? null;
-  const usernameChanged = oldUsername !== newUsername;
-  const globalChanged = oldGlobal !== newGlobal;
-  if (!usernameChanged && !globalChanged) return;
-
-  // userUpdate is account-global; log it under each guild we share with the user
-  // (this bot is effectively single-guild, so that's normally just one).
-  for (const guild of client.guilds.cache.values()) {
-    if (!guild.members.cache.has(user.id)) continue;
-    if (usernameChanged)
-      await db.recordNameChange(user.id, user.tag, 'username', oldUsername, newUsername);
-    if (globalChanged)
-      await db.recordNameChange(user.id, user.tag, 'global_name', oldGlobal, newGlobal);
-    await sendLog({
-      embeds: [
-        profileNameEmbed(user, { usernameChanged, oldUsername, newUsername, globalChanged, oldGlobal, newGlobal }),
-      ],
-    });
-  }
-
-  await db.setUserState(user.id, newUsername, newGlobal);
-}
-
-// Resolve the target of a >> command: a mention, a raw user id, or a
-// (case-insensitive) username / current nickname.
-async function resolveUser(message, args) {
-  const mentioned = message.mentions.users.first();
-  if (mentioned) return mentioned;
-
-  const q = args.join(' ').replace(/^@/, '').trim();
-  if (!q) return null;
-
-  if (/^\d{5,}$/.test(q)) {
-    const byId = await message.client.users.fetch(q).catch(() => null);
-    if (byId) return byId;
-  }
-
-  await ensureGuildMembers(message.guild);
-  const member = message.guild.members.cache.find(
-    (m) =>
-      m.user.username.toLowerCase() === q.toLowerCase() ||
-      (m.nickname && m.nickname.toLowerCase() === q.toLowerCase())
-  );
-  return member?.user ?? null;
-}
-
-// Join lines into an embed-description-safe block (Discord caps at 4096),
-// dropping the oldest and noting how many were hidden.
-function fitLines(lines, budget = 3800) {
-  let out = [];
-  let len = 0;
-  let dropped = 0;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (len + lines[i].length + 1 > budget) {
-      dropped = i + 1;
-      break;
-    }
-    out.unshift(lines[i]);
-    len += lines[i].length + 1;
-  }
-  if (dropped) out.unshift(`*…${dropped} older entries not shown*`);
-  return out.join('\n');
-}
-
-async function handleNicknamesCommand(message, args) {
-  const user = await resolveUser(message, args);
-  if (!user) {
-    await message.reply('User not found. Usage: `>>nicknames @user`');
-    return;
-  }
-  const history = await db.getNicknameHistory(user.id);
-  const member = await message.guild.members.fetch(user.id).catch(() => null);
-
-  const lines = history.map((r) => {
-    const nick = r.nickname ?? '*(reset to username)*';
-    return `**${nick}** — <t:${Math.floor(new Date(r.changed_at).getTime() / 1000)}:f>`;
-  });
-
-  const embed = new EmbedBuilder()
-    .setColor(0x3498db)
-    .setTitle(`Nickname history — ${user.tag}`)
-    .setThumbnail(user.displayAvatarURL())
-    .setDescription(
-      `**Current nickname:** ${member?.nickname ?? '*(none — uses username)*'}\n` +
-      `**Username:** ${user.username}\n\n` +
-      (lines.length ? `**Changes recorded:**\n${fitLines(lines)}` : '*No nickname changes recorded yet.*')
-    );
-  await message.channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
-}
-
-async function handleRolesCommand(message, args) {
-  const user = await resolveUser(message, args);
-  if (!user) {
-    await message.reply('User not found. Usage: `>>roles @user`');
-    return;
-  }
-  const member = await message.guild.members.fetch(user.id).catch(() => null);
-  const history = await db.getRoleHistory(user.id);
-
-  const currentRoles = member
-    ? [...member.roles.cache.values()]
-        .filter((r) => r.id !== message.guild.id)
-        .sort((a, b) => b.position - a.position)
-        .map((r) => r.name)
-    : [];
-
-  const changeLines = history.map((r) => {
-    const sign = r.action === 'add' ? '➕' : '➖';
-    return `${sign} ${r.role_name ?? r.role_id} — <t:${Math.floor(new Date(r.changed_at).getTime() / 1000)}:f>`;
-  });
-
-  // Description caps at 4096: the roles list is truncated and the history block
-  // gets a smaller budget so the two can never overflow together (a member can
-  // hold up to 250 roles — the join alone can pass 5000 chars).
-  const embed = new EmbedBuilder()
-    .setColor(0x9b59b6)
-    .setTitle(`Roles — ${user.tag}`)
-    .setThumbnail(user.displayAvatarURL())
-    .setDescription(
-      (member
-        ? `**Current roles (${currentRoles.length}):** ${currentRoles.length ? truncate(currentRoles.join(', '), 1000) : '*none*'}`
-        : '*User is no longer in the server.*') +
-      '\n\n' +
-      (changeLines.length ? `**Recent role changes:**\n${fitLines(changeLines, 2800)}` : '*No role changes recorded yet.*')
-    );
-  await message.channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
-}
-
-async function handleNickPrefixCommand(message) {
-  const [cmd, ...args] = message.content.slice(NICK_PREFIX.length).trim().split(/\s+/);
-  const c = cmd.toLowerCase();
-  try {
-    if (c === 'nicknames' || c === 'nicks' || c === 'nick') await handleNicknamesCommand(message, args);
-    else if (c === 'roles' || c === 'role') await handleRolesCommand(message, args);
-    else if (c === 'settings' || c === 'config') await handleSettingsCommand(message);
-    else if (c === 'failsafe' || c === 'jarvis' || c === 'status') await handleFailsafeCommand(message);
-    else if (c === 'help' || c === '')
-      await message.reply(
-        'Commands: `>>nicknames @user`, `>>roles @user`, `>>settings` (owner), `>>failsafe` (owner)'
-      );
-  } catch (err) {
-    console.error(`[nick-command] ${cmd} error:`, err.message);
-  }
-}
-
-// Persist (or refresh) the stored image attachments for a GROUP advert post so
-// the browse site can show them. No-ops for non-group channels. Best-effort:
-// download/storage failures are logged, never thrown into the event handler.
-async function syncAdvertImages(message) {
-  if (!advertImages.isGroupChannel(message.channelId)) return;
-  try {
-    const descriptors = advertImages.fromDiscordMessage(message);
-    if (descriptors.length === 0) {
-      await db.clearAdvertAttachments(message.id);
-      return;
-    }
-    const images = await advertImages.downloadImages(descriptors);
-    await db.setAdvertAttachments(message.id, message.channelId, images);
-  } catch (err) {
-    console.error('[advert-images] sync error:', err.message);
-  }
-}
-
-// On an edit, re-capture group-ad images only when the image set actually
-// changed versus what's already stored (`stored.attachments` metadata). Handles
-// the attachment-only edit — e.g. removing an image without touching the text —
-// which the content-changed guard alone would miss.
-async function reconcileAdvertImages(message, stored) {
-  if (!advertImages.isGroupChannel(message.channelId)) return;
-  const current = advertImages.imageSignature(advertImages.fromDiscordMessage(message));
-  const previous = advertImages.imageSignature(stored?.attachments);
-  if (current !== previous) await syncAdvertImages(message);
-}
-
 client.on('messageCreate', async (message) => {
+  // #rule_infractions sticky cleanup: when anyone other than logger-bot posts
+  // there, YAGPDB owns the sticky again, so drop any copycat we left. Runs before
+  // the shouldTrack gate because #rule_infractions may be an ignored channel.
+  try {
+    await infractionSticky.handleForeignPost(message);
+  } catch (err) {
+    console.error('[infr-sticky] cleanup error:', err.message);
+  }
   if (message.guildId && !message.author.bot) {
     if (message.content.startsWith(PREFIX)) await handleCommand(message);
     else if (message.content.startsWith(NICK_PREFIX)) await handleNickPrefixCommand(message);
@@ -885,7 +118,7 @@ client.on('messageCreate', async (message) => {
       await db.upsertMessage(message);
       // Group-ad images are captured after the row exists (setAdvertAttachments
       // updates it). Own try/catch inside, so it never masks the insert error.
-      await syncAdvertImages(message);
+      await advertSync.syncAdvertImages(message);
     } catch (err) {
       console.error('[create] db error:', err.message);
     }
@@ -930,14 +163,12 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
   // Real content edits always set editedTimestamp; the rest never do.
   if (!newMessage.editedTimestamp) return;
 
-  // Look up the archived (pre-edit) content once: it drives both the
-  // content-changed guard here and the before/after edit log further down.
-  // editedTimestamp stays set forever once a message has been edited, so Discord
-  // keeps re-firing messageUpdate on it for embed unfurls, pins and flag changes
-  // — none of which touch the text. Without this guard the advert/intro
-  // edit-enforcement would re-flag the same violation on every re-fire (the
-  // "infracted twice more" bug). The archive is updated at the end of this
-  // handler, so a genuine edit differs here while a re-fire matches.
+  // Look up the archived (pre-edit) content: drives the content-changed guard and
+  // the before/after log. editedTimestamp stays set forever, so Discord re-fires
+  // messageUpdate for embed unfurls/pins/flag changes that don't touch the text;
+  // the guard skips those so edit-enforcement doesn't re-flag. The archive is
+  // updated at the end of this handler, so a genuine edit differs while a re-fire
+  // matches.
   let stored;
   try {
     stored = await db.getMessage(newMessage.id);
@@ -947,11 +178,10 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
   const oldContent = stored?.content ?? null;
   const contentUnchanged = oldContent !== null && oldContent === newMessage.content;
 
-  // Enforce the advert rules on *genuinely edited* content — YAGPDB (free tier)
-  // can't run commands on edits, so unlike the outage failsafe this always runs.
-  // It's non-destructive (over-length edits are warned, not deleted), so the
-  // post still exists and the edit is logged normally below. Skipped on re-fires
-  // that carry no text change so we never double-flag the same edit.
+  // Enforce advert rules on genuinely-edited content. YAGPDB's free tier can't run
+  // commands on edits, so this always runs (not just during an outage). It's
+  // non-destructive (over-length is warned, not deleted); skipped when the text is
+  // unchanged so an edit isn't double-flagged.
   if (!contentUnchanged) {
     try {
       await advertFailsafe.handleAdvertEdit(newMessage, sendLog);
@@ -975,7 +205,7 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
     // log, but still reconcile group-ad images — an image may have been added or
     // removed with no text change (a no-op when the image set is untouched).
     if (contentUnchanged) {
-      await reconcileAdvertImages(newMessage, stored);
+      await advertSync.reconcileAdvertImages(newMessage, stored);
       return;
     }
 
@@ -989,9 +219,8 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
       `**Channel:** ${newMessage.channel} — [jump to message](${newMessage.url})\n` +
       `**Originally sent:** <t:${Math.floor(newMessage.createdTimestamp / 1000)}:f>`;
 
-    // Everything in the description that isn't a before/after body: the metadata
-    // block, the section labels, and the blank-line separators. Its exact length
-    // is what's left over for the two bodies to share.
+    // The description minus the two bodies (metadata + labels + separators); its
+    // length is the budget the before/after bodies share.
     const scaffold = `${meta}\n\n**Before:**\n\n\n**After:**\n`;
     const [before, after] = splitTruncate(beforeText, afterText, DESC_MAX - scaffold.length);
 
@@ -1017,40 +246,32 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
     } else {
       await db.upsertMessage(newMessage);
     }
-    // Reconcile group-ad images (row now exists for the FK). Only re-downloads
-    // when the image set changed, so a pure text edit doesn't refetch bytes.
-    await reconcileAdvertImages(newMessage, stored);
+    // Reconcile group-ad images (row exists now for the FK); only re-downloads
+    // when the image set changed.
+    await advertSync.reconcileAdvertImages(newMessage, stored);
   } catch (err) {
     console.error('[update] error:', err.message);
   }
 });
 
 client.on('messageDelete', async (message) => {
-  // Consume our own suppression marker first — before the LOGGING_ENABLED
-  // guard, so the set is drained even when logging is off (otherwise it
-  // leaks). It means "the advert failsafe deleted this itself and already
-  // logged it", so skip the per-message embed.
+  // The advert failsafe deleted this itself and already logged it — skip the
+  // embed. Consumed before the LOGGING_ENABLED guard so the marker never leaks.
   if (advertFailsafe.consumeSuppressedDelete(message.id)) return;
   if (!LOGGING_ENABLED) return;
   if (message.guildId && message.channelId === LOG_CHANNEL_ID) return;
-  // IGNORE_CHANNELS opt-out — matches shouldTrack (messageCreate/edit) and the
-  // bulk-delete handler, so a channel we don't archive isn't logged on delete.
+  // IGNORE_CHANNELS opt-out, matching shouldTrack.
   if (isIgnoredMessage(message)) return;
-  // Honour IGNORE_BOTS by the *post's author*, not the deleter: a bot's post
-  // was never archived, so don't log its deletion. A human's post is still
-  // logged even when a bot deletes it (the deleter is resolved separately from
-  // the audit log). This catches cached (non-partial) bot posts; uncached ones
-  // have no author to test and are handled after the stored-row lookup below.
+  // IGNORE_BOTS applies to the post's author, not the deleter: a bot's post was
+  // never archived, so skip it (a human post deleted by a bot is still logged).
+  // Catches cached bot posts; uncached ones are handled after the row lookup.
   if (IGNORE_BOTS && message.author?.bot) return;
   try {
     const stored = await db.getMessage(message.id);
     if (!stored && !message.guildId) return; // uncached DM, nothing to report
-    // Uncached bot post: with IGNORE_BOTS on we never archived it, so there's no
-    // stored row AND no cached author to identify it. Logging it yields a useless
-    // "unknown / content not archived" embed. The recurring advert-channel case
-    // is YAGPDB's sticky embed, which it deletes and reposts after every advert.
-    // A human post is archived on create, so a missing row + missing author here
-    // means it was a bot (or predates the bot — also not worth an embed).
+    // Uncached bot post (IGNORE_BOTS on): no stored row and no cached author, so
+    // logging it yields a useless "unknown" embed. A human post is archived on
+    // create, so a missing row + missing author means it was a bot (or predates us).
     if (IGNORE_BOTS && !stored && !message.author) return;
 
     const authorLine = stored
@@ -1059,8 +280,8 @@ client.on('messageDelete', async (message) => {
         ? `${message.author} (\`${message.author.tag}\`)`
         : '*unknown (not archived)*';
     const content = stored ? stored.content : message.content;
-    // Attachments aren't archived to the DB anymore, so we can only list them
-    // when the deleted message is still cached (non-partial); otherwise none.
+    // Attachments aren't in the DB, so list them only when the message is still
+    // cached (non-partial).
     const attachments = message.attachments
       ? [...message.attachments.values()].map((a) => ({ name: a.name, url: a.url }))
       : [];
@@ -1075,8 +296,8 @@ client.on('messageDelete', async (message) => {
       : executor === null ? 'Not in audit log (deleted either by author or a bot).'
       : '*unknown*';
 
-    // A stored row or a still-cached (non-partial) message means we know the
-    // real content, even if it was empty (attachment-only messages).
+    // A stored row or a cached (non-partial) message means we know the real
+    // content (even if empty — attachment-only messages).
     const contentText = stored || !message.partial
       ? (content || '*(no text content)*')
       : '*(content not archived — sent before this bot came online)*';
@@ -1137,8 +358,7 @@ client.on('messageDeleteBulk', async (messages) => {
 
     const channelId = stored[0]?.channel_id ?? messages.first()?.channelId;
 
-    // Bulk deletes (purges) get their own audit type; the entry is always
-    // fresh since counts aren't batched across channels the same way.
+    // Bulk deletes have their own audit type; the entry is always fresh.
     let purgedBy = '*unknown*';
     try {
       await sleep(1200);
@@ -1185,9 +405,8 @@ client.on('messageDeleteBulk', async (messages) => {
   }
 });
 
-// Onboarding failsafe: reacting to the server-rules message agrees to the rules
-// and (while YAGPDB is offline) advances Rules Please -> Newbie. Self-gates on
-// the message id, emoji, and YAGPDB status.
+// Onboarding failsafe: reacting to the rules message advances Rules Please →
+// Newbie while YAGPDB is offline. Self-gates on message id, emoji, YAGPDB status.
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   try {
     await onboardingFailsafe.handleRulesReaction(reaction, user, sendLog);
@@ -1196,45 +415,21 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
   }
 });
 
-// Keep advert posts' stored reactions current. A single reaction add/remove only
-// tells us about one emoji, and the counts on a partial event can be stale, so
-// we refetch the whole message and rewrite its full reaction summary — the
-// message is the source of truth. Gated to advert channels; no-ops elsewhere.
-async function syncAdvertReactions(reaction) {
-  if (!LOGGING_ENABLED) return;
-  const channelId = reaction.message?.channelId;
-  if (!channelId || !ADVERT_CHANNEL_SET.has(channelId)) return;
-  let message = reaction.message;
-  try {
-    message = await message.fetch(); // force-refetch => authoritative reactions
-  } catch {
-    return; // message deleted before we could read it
-  }
-  try {
-    await db.setReactions(message.id, reactionSummary(message));
-  } catch (err) {
-    console.error('[reactions] db error:', err.message);
-  }
-}
-
+// Keep advert posts' stored reactions current on add/remove/clear. The sync
+// (refetch the message, rewrite its full reaction summary) lives in advertSync,
+// gated to advert channels; these handlers just forward the event.
 client.on(Events.MessageReactionAdd, (reaction) => {
-  syncAdvertReactions(reaction);
+  advertSync.syncAdvertReactions(reaction);
 });
 client.on(Events.MessageReactionRemove, (reaction) => {
-  syncAdvertReactions(reaction);
+  advertSync.syncAdvertReactions(reaction);
 });
 client.on(Events.MessageReactionRemoveEmoji, (reaction) => {
-  syncAdvertReactions(reaction);
+  advertSync.syncAdvertReactions(reaction);
 });
 // Removing all reactions gives a message, not a reaction — clear the column.
-client.on(Events.MessageReactionRemoveAll, async (message) => {
-  if (!LOGGING_ENABLED) return;
-  if (!message?.channelId || !ADVERT_CHANNEL_SET.has(message.channelId)) return;
-  try {
-    await db.setReactions(message.id, null);
-  } catch (err) {
-    console.error('[reactions] db error:', err.message);
-  }
+client.on(Events.MessageReactionRemoveAll, (message) => {
+  advertSync.clearAdvertReactions(message);
 });
 
 // Seed a baseline for brand-new members so their first nickname/role change is
@@ -1257,9 +452,8 @@ client.on(Events.GuildMemberAdd, async (member) => {
       console.error('[member-add] log error:', err.message);
     }
   }
-  // Assign the Age Please gate role on join (always, so it's applied instantly
-  // rather than waiting on YAGPDB — the add is idempotent if YAGPDB assigns too).
-  // Kept in a separate try so a DB hiccup above never blocks it (and vice versa).
+  // Assign the Age Please gate role on join instantly (idempotent if YAGPDB also
+  // assigns it). Separate try so a DB hiccup above doesn't block it.
   try {
     await failsafe.handleMemberJoin(member, sendLog);
   } catch (err) {
@@ -1267,10 +461,8 @@ client.on(Events.GuildMemberAdd, async (member) => {
   }
 });
 
-// Post a leave card when a member departs (leaves, is kicked, or is banned).
-// The member may be partial/uncached — memberLeaveEmbed handles missing
-// joinedTimestamp/roles. Always on (like name changes); sendLog still honours
-// the master log_to_channel switch.
+// Leave card on any departure (leave/kick/ban). memberLeaveEmbed handles a
+// partial/uncached member. Always on; sendLog still honours log_to_channel.
 client.on(Events.GuildMemberRemove, async (member) => {
   if (!LOGGING_ENABLED) return;
   if (member.user?.id === client.user.id) return; // ignore our own removal
@@ -1299,7 +491,10 @@ client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
 client.on(Events.UserUpdate, async (_oldUser, newUser) => {
   if (!LOGGING_ENABLED) return;
   try {
-    await trackUserNameChanges(newUser);
+    // Serialize per user: userUpdate also fires for avatars and Discord can
+    // deliver duplicates, so two handlers could diff the same stale user_state and
+    // double-post. The `user:` prefix avoids colliding with guild-member keys.
+    await queueMemberChange(`user:${newUser.id}`, () => trackUserNameChanges(newUser));
   } catch (err) {
     console.error('[user-update] error:', err.message);
   }
@@ -1360,9 +555,8 @@ client.once(Events.ClientReady, async () => {
   }
   if (polls.ENABLED) await polls.start(client);
 
-  // Prime member state so nickname/role changes after startup are detected even
-  // for members who never triggered an event. The fetch also populates the cache
-  // the failsafe needs; the DB seeding only matters when logging is on.
+  // Prime member state so post-startup changes are detected even for members who
+  // never fired an event. The fetch also populates the cache the failsafe needs.
   if (needMessageIntents) {
     for (const guild of client.guilds.cache.values()) {
       try {
@@ -1387,10 +581,7 @@ client.once(Events.ClientReady, async () => {
   if (LOGGING_ENABLED) {
     for (const guild of client.guilds.cache.values()) {
       try {
-        const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MessageDelete, limit: 50 });
-        for (const entry of logs.entries.values()) {
-          rememberAuditCount(entry.id, entry.extra?.count ?? 1);
-        }
+        await primeAuditCounts(guild);
       } catch (err) {
         console.warn(`[audit] could not prime counts for ${guild.name}:`, err.message);
       }
@@ -1432,8 +623,8 @@ client.once(Events.ClientReady, async () => {
     } else {
       console.log('[failsafe] onboarding failsafe inactive — set AGE_VERIFY_CHANNEL_ID to enable.');
     }
-    // Keep each guild's "last seen online" stamp fresh so the advert failsafe's
-    // sustained-outage guard measures real downtime (not just time since boot).
+    // Refresh each guild's "last seen online" stamp so the sustained-outage guard
+    // measures real downtime, not time since boot.
     for (const guild of client.guilds.cache.values()) failsafe.markYagpdbSeen(guild);
     const tick = setInterval(() => {
       for (const guild of client.guilds.cache.values()) failsafe.markYagpdbSeen(guild);
@@ -1443,8 +634,8 @@ client.once(Events.ClientReady, async () => {
     console.log('[failsafe] disabled (FAILSAFE_ENABLED=false); GuildPresences intent not requested.');
   }
 
-  // Advert edit-enforcement is independent of the failsafe (it fills a gap
-  // YAGPDB can't cover on any tier), so report it separately.
+  // Advert edit-enforcement is independent of the failsafe (YAGPDB can't cover
+  // edits on any tier), so report it separately.
   if (advertFailsafe.editChecksActive) {
     console.log(
       `[advert-edit] armed — advert rules enforced on edits for ${advertFailsafe.channelCount} ` +
@@ -1457,10 +648,8 @@ client.once(Events.ClientReady, async () => {
     console.log('[intro-edit] armed — 800-char limit enforced on intro edits, regardless of YAGPDB status.');
   }
 
-  // Retention prune: trims the DB archive so storage stays bounded. Advert
-  // channels are pruned after their retention window, every other channel after
-  // a longer one. Never touches Discord — it only deletes local database rows.
-  // Disable with DB_RETENTION_ENABLED=false.
+  // Retention prune: trims the DB archive (DB rows only, never Discord). Adverts
+  // pruned after their window, other channels after a longer one.
   if (retention.ENABLED) {
     console.log(
       `[retention] armed — adverts pruned after ${retention.advertRetentionDays}d, ` +
@@ -1471,16 +660,13 @@ client.once(Events.ClientReady, async () => {
     console.log('[retention] disabled (DB_RETENTION_ENABLED=false).');
   }
 
-  // Dead-link sweep: once a day (in-process, since hosts like Wispbyte only run
-  // `npm start` and offer no cron). Dormant unless LINK_CHECK_CHANNELS is set;
-  // `npm run check-links` still runs it manually on demand.
+  // Dead-link sweep: daily, in-process (no cron on hosts like Wispbyte). Dormant
+  // unless LINK_CHECK_CHANNELS is set; `npm run check-links` runs it manually.
   linkCheck.scheduleLinkCheck(client);
 
-  // Member-growth stats: incrementally scan #guestbook + the member-count channel
-  // so member_events / member_count_samples stay current for rpc-web's stats page,
-  // replacing the manual `npm run member-stats`. Catches up on boot, then runs
-  // just after each UTC midnight (when the chart rolls the prior day to a finished
-  // bar). Needs the message intents to read join/leave history and count embeds.
+  // Member-growth stats: scan #guestbook + the member-count channel to keep
+  // member_events / member_count_samples current for rpc-web. Catches up on boot,
+  // then runs just after each UTC midnight. Needs the message intents.
   if (memberStats.ENABLED && needMessageIntents) {
     memberStats.schedule(client, db.pool);
     console.log(
@@ -1494,18 +680,22 @@ client.once(Events.ClientReady, async () => {
     console.log('[member-stats] disabled (MEMBER_STATS_ENABLED=false).');
   }
 
-  // Infraction re-check (auto-approval): re-tests flagged adverts/intros on a
-  // schedule and clears :staffpending: / marks the ping :staffapproved: once
-  // fixed, or removes a still-broken post at the terminal stage. Persisted in the
-  // DB, so it resumes any in-flight re-checks across restarts.
+  // Infraction re-check: re-tests flagged adverts/intros on a schedule; clears
+  // :staffpending: / marks the ping :staffapproved: when fixed, or removes a
+  // still-broken post at the terminal stage. Resumes across restarts (DB-backed).
   advertFailsafe.scheduleRechecks(client, sendLog);
+
+  // Expire the #rule_infractions pings this bot posts (YAGPDB's sweep skips bot
+  // messages, so they'd never age out). No-op until a post is recorded.
+  if (advertConfig.SHARED?.infractionsChannelId) {
+    infractionExpiry.scheduleInfractionExpiry(client);
+  }
 });
 
 client.on('error', (err) => console.error('[client] error:', err.message));
 process.on('unhandledRejection', (err) => console.error('[unhandled]', err));
-// Last-resort backstop: a synchronous throw in a timer/callback (retention,
-// failsafe tick, link-check) would otherwise crash the process and stop logging.
-// Log and stay alive — this bot is stateless per-event and the pg Pool self-heals.
+// Backstop: a throw in a timer/callback would otherwise crash the process and stop
+// logging. Log and stay alive — the bot is stateless per-event and the pool self-heals.
 process.on('uncaughtException', (err) => console.error('[uncaught]', err));
 
 db.init()

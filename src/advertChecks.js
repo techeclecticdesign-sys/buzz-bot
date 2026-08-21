@@ -65,9 +65,11 @@ function hasAnyHeader(content) {
 }
 
 // Group rule: at most ONE header line, each within its size cap (# ≤50, ## ≤60,
-// ### ≤70), counting a custom emoji <:name:id> as a single glyph. A bare marker
-// line is stitched to the following line for the count + cap. Returns true if
-// the post breaks the rule (too many headers or one too long).
+// ### ≤70). The cap counts only what actually RENDERS: a masked link
+// [text](url) shows just its anchor text — drop the URL; a custom emoji
+// <:name:id> / <a:name:id> shows as one glyph — collapse it to a single char.
+// A bare marker line is stitched to the following line for the count + cap.
+// Returns true if the post breaks the rule (too many headers or one too long).
 function groupHeaderIssue(content) {
   const lines = (content || '').split('\n');
   const headers = [];
@@ -85,7 +87,9 @@ function groupHeaderIssue(content) {
   if (headers.length > 1) return true;
   for (const h of headers) {
     const cap = h.level === 3 ? 70 : h.level === 2 ? 60 : 50;
-    const body = h.body.replace(/<a?:\w+:\d+>/g, 'x');
+    const body = h.body
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/<a?:\w+:\d+>/g, 'x');
     if (runeLength(body) > cap) return true;
   }
   return false;

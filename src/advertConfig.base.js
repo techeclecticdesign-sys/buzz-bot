@@ -1,8 +1,6 @@
-// Shared advert-config builder. The per-server variant files
-// (advertConfig.test.js / advertConfig.live.js) call build() with just their
-// channel IDs; advertConfig.js picks which variant to load. Keeping the rules,
-// banned list, and embed here — rather than duplicated per variant — avoids the
-// drift problem the YAGPDB templates warn about.
+// Shared advert-config builder. The per-server variant files (advertConfig.live.js
+// / .test.js) call build() with just their channel IDs; advertConfig.js picks the
+// variant. Rules, banned list, and embed live here so the variants can't drift.
 
 const BANNED = ['futa', 'futanari', 'futas', 'futanaris']; // keep lowercase
 

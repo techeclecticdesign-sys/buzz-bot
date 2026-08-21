@@ -25,11 +25,9 @@ function isImage(contentType, filename) {
   return !!filename && IMAGE_EXT_RE.test(filename);
 }
 
-// A stable, order-independent signature of an image set (either live descriptors
-// or stored `attachments` metadata — both carry `filename`). Used on edits to
-// decide whether the images actually changed vs what's stored, so repeated edit
-// re-fires with the same images don't trigger a re-download. JSON.stringify of
-// the sorted names is unambiguous even if a filename contains odd characters.
+// Order-independent signature of an image set (live descriptors or stored
+// `attachments` metadata — both carry `filename`), so an edit can tell whether the
+// images actually changed and avoid a needless re-download.
 function imageSignature(list) {
   const names = (Array.isArray(list) ? list : []).map((a) => a.filename ?? '').sort();
   return JSON.stringify(names);

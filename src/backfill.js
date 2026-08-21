@@ -1,50 +1,34 @@
-// One-time (re-runnable) script: walks every readable channel and thread and
-// archives existing message history. Discord pages newest-to-oldest.
+// One-time (re-runnable) script: walks every readable channel + thread and archives
+// message history (Discord pages newest→oldest).
 //
-// Two destinations, two cutoffs:
-//   • Database — only messages inside the retention window (below), since the
-//     daily retention job would prune anything older anyway.
-//   • Local JSON archive (when JSON_ARCHIVE_DIR is set) — ALL of history, no
-//     cutoff, so you keep a complete offline copy even though the DB is trimmed.
-// With JSON_ARCHIVE_DIR unset there's nothing to gain past the DB cutoff, so
-// paging stops there (the original behavior).
+// Two destinations: the DB (only messages inside the retention window — older would
+// be pruned anyway) and, when JSON_ARCHIVE_DIR is set, the local JSON archive (ALL
+// history, no cutoff). Unset → paging stops at the DB cutoff.
 //
-// Safe to re-run for the DB: existing rows are refreshed with the currently
-// fetched content, and new rows are inserted. Note the JSON archive is
-// append-only, so re-running APPENDS the
-// all-time history again — regenerate it fresh with `npm run export-json` (DB
-// rows only) or clear the JSON dir first if you need to re-run cleanly.
+// Safe to re-run for the DB (existing rows refresh, new rows insert). The JSON
+// archive is append-only, so re-running appends all-time history again — regenerate
+// with `npm run export-json` or clear the JSON dir first.
 //
-// INCREMENTAL MODE (`--incremental` / BACKFILL_INCREMENTAL=true, or
-// `npm run backfill:new`): only pull messages newer than what's already stored.
-//   • If a channel's most recent message (channel.lastMessageId) is already in
-//     the DB, the channel is skipped with ZERO history fetches.
-//   • Otherwise it pages newest→oldest and STOPS at the first message already in
-//     the DB — everything older is already archived. Only genuinely-new messages
-//     are written, so the JSON archive gains no duplicates either.
-//   Use this for cheap "catch up since last run" sweeps. Caveat: it fills gaps at
-//   the RECENT end only; if the bot missed messages in the MIDDLE of a channel's
-//   history (a stored message newer than the gap exists), run a full backfill.
-//
-// ADVERTS-ONLY MODE (`--adverts` / BACKFILL_ADVERTS_ONLY=true, or
-// `npm run backfill:adverts`): walk ONLY the configured advert channels, skipping
-//   threads and every other channel. Reaction counts ride along in each fetched
-//   message for free, so this is the cheap one-off for seeding/refreshing advert
-//   reactions across the DB WITHOUT re-scanning the huge general channels (which
-//   can run to millions of messages and take days). Same DB write path as a full
-//   backfill; JSON archiving is disabled in this mode. Run it non-incremental so
-//   reactions on already-stored adverts get refreshed. After this one-off, the
-//   live reaction handlers keep everything current.
+// Modes:
+//   INCREMENTAL (--incremental / BACKFILL_INCREMENTAL): only pull messages newer
+//     than what's stored — skips a channel entirely if its last message is already
+//     in the DB, else pages until the first stored message. Fills gaps at the recent
+//     end only; a mid-history gap needs a full backfill.
+//   ADVERTS-ONLY (--adverts / BACKFILL_ADVERTS_ONLY): walk only the configured
+//     advert channels (no threads/other channels) to refresh reaction counts cheaply
+//     without re-scanning the huge general channels. JSON archiving off in this mode;
+//     run it non-incremental so stored adverts' reactions refresh.
 require('dotenv').config();
 const { Client, Events, GatewayIntentBits } = require('discord.js');
 const db = require('./db');
 const { isIgnoredChannel } = require('./ignoredChannels');
 const advertConfig = require('./advertConfig');
 const { reactionSummary } = require('./reactions');
+const config = require('./config');
 
 // Mirror the live bot's IGNORE_BOTS behaviour so a backfill doesn't re-seed the
 // archive with the very bot posts the running bot is configured to skip.
-const IGNORE_BOTS = process.env.IGNORE_BOTS === 'true';
+const IGNORE_BOTS = config.flag('IGNORE_BOTS');
 
 // Same retention windows as src/retention.js: advert channels keep 1 year of
 // history, everything else 2 years. Backfilling past those would archive rows
@@ -52,8 +36,8 @@ const IGNORE_BOTS = process.env.IGNORE_BOTS === 'true';
 // Neon storage spike for nothing.
 const DAY_MS = 24 * 60 * 60 * 1000;
 // Clamped to ≥1, matching retention.js (a negative value would skip everything).
-const ADVERT_RETENTION_DAYS = Math.max(1, Number(process.env.ADVERT_RETENTION_DAYS) || 365);
-const OTHER_RETENTION_DAYS = Math.max(1, Number(process.env.MESSAGE_RETENTION_DAYS) || 730);
+const ADVERT_RETENTION_DAYS = config.num('ADVERT_RETENTION_DAYS', 365, { min: 1 });
+const OTHER_RETENTION_DAYS = config.num('MESSAGE_RETENTION_DAYS', 730, { min: 1 });
 const RUN_STARTED_AT = Date.now(); // one consistent cutoff for the whole run
 const ADVERT_CHANNELS = new Set(advertConfig.ALL_ADVERT_CHANNELS);
 
@@ -64,7 +48,7 @@ const ADVERT_CHANNELS = new Set(advertConfig.ALL_ADVERT_CHANNELS);
 // script and the same DB write path as a full backfill, just scoped, so there's
 // no second command to maintain.
 const ADVERTS_ONLY =
-  process.argv.includes('--adverts') || process.env.BACKFILL_ADVERTS_ONLY === 'true';
+  process.argv.includes('--adverts') || config.flag('BACKFILL_ADVERTS_ONLY');
 
 // When a JSON archive dir is configured we walk each channel's FULL history so
 // the offline copy is complete; the DB still only takes messages within the
@@ -75,7 +59,7 @@ const ARCHIVE_ALL = !!process.env.JSON_ARCHIVE_DIR && !ADVERTS_ONLY;
 
 // Only fetch messages newer than what's already stored (see the header note).
 const INCREMENTAL =
-  process.argv.includes('--incremental') || process.env.BACKFILL_INCREMENTAL === 'true';
+  process.argv.includes('--incremental') || config.flag('BACKFILL_INCREMENTAL');
 
 // Running totals across the whole run (DB rows vs. JSON records — they differ
 // whenever ARCHIVE_ALL reaches past the retention window).

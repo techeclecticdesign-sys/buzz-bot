@@ -1,19 +1,35 @@
 // Slash-command definitions + interaction routing for the game.
 // Every handler defers first, then does DB work, then edits the reply — Neon's
 // free tier can cold-start past Discord's 3s ack window, so we never rely on it.
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const data = require('./gameData');
 const db = require('./db');
 const logic = require('./logic');
 const ui = require('./ui');
+const config = require('../config');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const hospTs = (p) => Math.floor(new Date(p.hospital_until).getTime() / 1000);
+// Same out-of-action timer, worded by cause: 'jail' for a botched crime,
+// 'the hospital' for a combat KO (default when the reason is unset).
+const incapPlace = (p) => (p.incap_reason === 'jail' ? 'jail' : 'the hospital');
+const incapIcon = (p) => (p.incap_reason === 'jail' ? '🚔' : '🏥');
+
+// Staff roles allowed to run destructive game commands (e.g. /mreset). Shares
+// the bot-wide MOD_ROLES env used by c!threadkill — one staff list, one source.
+const MOD_ROLES = config.idList('MOD_ROLES');
+function isStaff(interaction) {
+  const member = interaction.member;
+  if (!member) return false; // D M / no guild context — never staff
+  if (MOD_ROLES.length && member.roles?.cache?.hasAny?.(...MOD_ROLES)) return true;
+  // Fallback so the server can always reset even before MOD_ROLES is configured.
+  return !!interaction.memberPermissions?.has('Administrator');
+}
 
 // Optional public announcements (big crime scores + won attacks). Set
 // GAME_ANNOUNCE_CHANNEL_ID to enable; leave unset to keep the game silent.
 const ANNOUNCE_CHANNEL_ID = process.env.GAME_ANNOUNCE_CHANNEL_ID;
-const ANNOUNCE_CRIME_MIN = Number(process.env.GAME_ANNOUNCE_CRIME_MIN) || 10000;
+const ANNOUNCE_CRIME_MIN = config.num('GAME_ANNOUNCE_CRIME_MIN', 10000);
 async function announce(client, text) {
   if (!ANNOUNCE_CHANNEL_ID) return;
   try {
@@ -35,18 +51,17 @@ function commandData() {
       .setDescription('Attack a rival to steal their cash (once a day)')
       .addUserOption((o) => o.setName('target').setDescription('Who to attack').setRequired(true)),
     new SlashCommandBuilder().setName('shop').setDescription('Buy weapons, armor, and property'),
-    new SlashCommandBuilder().setName('collect').setDescription('Collect income from your property'),
     new SlashCommandBuilder().setName('top').setDescription('Show the leaderboard'),
     new SlashCommandBuilder().setName('mhelp').setDescription('How to play'),
+    new SlashCommandBuilder().setName('mreset').setDescription('Staff only: wipe ALL players and restart the game'),
   ].map((c) => c.toJSON());
 }
 
-// --- /mprofile (auto-collects property income on check-in) ---
+// --- /mprofile (materialize banks property income on check-in) ---
 async function cmdProfile(interaction) {
   await interaction.deferReply({ flags: EPHEMERAL });
   const player = await db.withPlayer(interaction.user.id, async (client, p) => {
     logic.materialize(p);
-    logic.collectProperty(p);
     await db.savePlayer(client, p);
     return p;
   });
@@ -70,7 +85,7 @@ function crimeResultLine(crime, r, player) {
     if (r.levels) line += `\n🎉 **Level up!** You're now level ${player.level}.`;
     return line;
   }
-  if (r.botched) return `🚑 Botched job! **${crime.name}** went sideways — you're in the hospital until <t:${hospTs(player)}:R>.`;
+  if (r.botched) return `🚔 Botched job! **${crime.name}** went sideways — you're in jail, out <t:${hospTs(player)}:R>.`;
   return `❌ **${crime.name}** failed — you got away, but empty-handed.`;
 }
 
@@ -82,7 +97,7 @@ async function onCrimePick(interaction) {
     let line;
     let result = null;
     if (!crime || p.level < crime.unlock) line = '⚠️ That crime is locked.';
-    else if (logic.isHospitalised(p)) line = `🏥 You're in the hospital until <t:${hospTs(p)}:R>.`;
+    else if (logic.isHospitalised(p)) line = `${incapIcon(p)} You're in ${incapPlace(p)}, out <t:${hospTs(p)}:R>.`;
     else if (logic.energyNow(p) < crime.energy) line = `⚠️ Not enough energy (need ${crime.energy}⚡).`;
     else {
       result = logic.doCrime(p, crime);
@@ -115,7 +130,7 @@ async function onGym(interaction) {
     logic.materialize(p);
     let line;
     if (!['strength', 'defense'].includes(stat)) line = '⚠️ Unknown exercise.';
-    else if (logic.isHospitalised(p)) line = `🏥 You're in the hospital until <t:${hospTs(p)}:R>.`;
+    else if (logic.isHospitalised(p)) line = `${incapIcon(p)} You're in ${incapPlace(p)}, out <t:${hospTs(p)}:R>.`;
     else if (logic.energyNow(p) < data.GYM.costEnergy) line = '⚠️ Not enough energy to train.';
     else {
       const r = logic.doGym(p, stat);
@@ -141,10 +156,10 @@ async function cmdHit(interaction) {
   const res = await db.withTwoPlayers(me, target.id, async (client, atk, def) => {
     logic.materialize(atk);
     logic.materialize(def);
-    if (logic.isHospitalised(atk)) return { line: `🏥 You're in the hospital until <t:${hospTs(atk)}:R>.` };
+    if (logic.isHospitalised(atk)) return { line: `${incapIcon(atk)} You're in ${incapPlace(atk)}, out <t:${hospTs(atk)}:R>.` };
     const cd = logic.attackCooldownLeftMs(atk);
     if (cd > 0) return { line: `⏳ You can attack again <t:${Math.floor((Date.now() + cd) / 1000)}:R>.` };
-    if (logic.isHospitalised(def)) return { line: `🛡️ **${target.username}** is in the hospital and can't be attacked right now.` };
+    if (logic.isHospitalised(def)) return { line: `🛡️ **${target.username}** is in ${incapPlace(def)} and can't be attacked right now.` };
     if (def.level < atk.level - data.COMBAT.maxLevelGapDown) {
       return { line: `🚫 You can't punch down more than ${data.COMBAT.maxLevelGapDown} levels.` };
     }
@@ -194,9 +209,8 @@ async function onShopBuy(interaction) {
       if (cat === 'weapon') p.weapon_id = id;
       else if (cat === 'armor') p.armor_id = id;
       else if (cat === 'property') {
-        // Bank the old property's accrued income before it's replaced.
-        const collected = logic.collectProperty(p);
-        if (collected > 0) line += ` (Collected ${ui.money(collected)} from your old property first.)`;
+        // materialize() already banked the old property's income above, so just
+        // switch over and start the new meter now.
         p.property_id = id;
         p.property_collected_at = new Date();
       }
@@ -207,23 +221,7 @@ async function onShopBuy(interaction) {
   await interaction.editReply({ embeds: [ui.shopEmbed(player, line)], components: [ui.shopMenu(player)] });
 }
 
-// --- /collect ---
-async function cmdCollect(interaction) {
-  await interaction.deferReply({ flags: EPHEMERAL });
-  const { income, player } = await db.withPlayer(interaction.user.id, async (client, p) => {
-    logic.materialize(p);
-    const income = logic.collectProperty(p);
-    await db.savePlayer(client, p);
-    return { income, player: p };
-  });
-  let content;
-  if (!player.property_id) content = "You don't own a property yet — buy one in `/shop`.";
-  else if (income > 0) content = `💰 Collected ${ui.money(income)} from your ${data.PROPERTIES_BY_ID[player.property_id].name}.`;
-  else content = 'Nothing to collect yet — check back later.';
-  await interaction.editReply({ content, embeds: [ui.profileEmbed(player, interaction.user)] });
-}
-
-// --- /top ---
+// --- /top (ranks by live cash, incl. unbanked property income — read-only) ---
 async function cmdTop(interaction) {
   await interaction.deferReply({ flags: EPHEMERAL });
   const rows = await db.top(10);
@@ -241,6 +239,44 @@ async function onHelpNav(interaction) {
   await interaction.update({ embeds: [ui.helpEmbed(i)], components: [ui.helpComponents(i)] });
 }
 
+// --- /mreset (staff only) — wipes every player after an explicit confirm ---
+const NO_PERMISSION = '🚫 You need a staff role to reset the game.';
+
+async function cmdReset(interaction) {
+  if (!isStaff(interaction)) {
+    return interaction.reply({ content: NO_PERMISSION, flags: EPHEMERAL });
+  }
+  const confirm = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('game:reset:confirm').setLabel('Wipe everything').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('game:reset:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+  );
+  await interaction.reply({
+    content:
+      '⚠️ **This deletes every player and all game history — permanently.**\n' +
+      'Everyone starts from scratch. This cannot be undone.',
+    components: [confirm],
+    flags: EPHEMERAL,
+  });
+}
+
+async function onReset(interaction) {
+  const action = interaction.customId.split(':')[2]; // 'confirm' | 'cancel'
+  // Re-check staff on the button too — the reply is ephemeral, but never trust
+  // the client for a destructive action.
+  if (!isStaff(interaction)) {
+    return interaction.update({ content: NO_PERMISSION, components: [] });
+  }
+  if (action !== 'confirm') {
+    return interaction.update({ content: '❌ Reset cancelled — nothing was changed.', components: [] });
+  }
+  await interaction.deferUpdate();
+  const wiped = await db.resetAll();
+  await interaction.editReply({
+    content: `💥 Game reset by <@${interaction.user.id}> — **${wiped}** player${wiped === 1 ? '' : 's'} wiped. The city's a clean slate.`,
+    components: [],
+  });
+}
+
 // Router. Returns true if this interaction was a game interaction (handled),
 // false otherwise so other listeners can have it.
 async function handleInteraction(interaction) {
@@ -251,9 +287,9 @@ async function handleInteraction(interaction) {
       case 'gym': await cmdGym(interaction); return true;
       case 'hit': await cmdHit(interaction); return true;
       case 'shop': await cmdShop(interaction); return true;
-      case 'collect': await cmdCollect(interaction); return true;
       case 'top': await cmdTop(interaction); return true;
       case 'mhelp': await cmdHelp(interaction); return true;
+      case 'mreset': await cmdReset(interaction); return true;
       default: return false;
     }
   }
@@ -271,6 +307,10 @@ async function handleInteraction(interaction) {
   }
   if (interaction.isButton() && interaction.customId.startsWith('game:help:')) {
     await onHelpNav(interaction);
+    return true;
+  }
+  if (interaction.isButton() && interaction.customId.startsWith('game:reset:')) {
+    await onReset(interaction);
     return true;
   }
   return false;

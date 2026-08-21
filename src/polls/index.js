@@ -8,13 +8,11 @@ const {
   SlashCommandBuilder,
 } = require('discord.js');
 const db = require('./db');
+const config = require('../config');
 
-const ENABLED = process.env.POLLS_ENABLED !== 'false';
+const ENABLED = config.bool('POLLS_ENABLED', true);
 // Only these staff roles may create polls. Everyone can still vote.
-const STAFF_ROLES = (process.env.STAFF_ROLES || '')
-  .split(',')
-  .map((id) => id.trim())
-  .filter(Boolean);
+const STAFF_ROLES = config.idList('STAFF_ROLES');
 const EPHEMERAL = MessageFlags.Ephemeral;
 const MAX_CHOICES = 20;
 const MAX_QUESTION_LENGTH = 1000;
