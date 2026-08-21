@@ -402,6 +402,14 @@ Options:
   One message per post. Leave unset for a console-only report. **Each sweep
   sends the first warning only once per post/reason. Later sweeps keep the grace
   clock, but do not re-ping unless the same post is fixed and later re-offends.**
+- **Auto-approval on fix:** the warning ping's id is stored against the post, so
+  when a later pass (the hourly re-check or the daily sweep) finds the offense
+  resolved — the invite is live again, the duplicate is gone, or the post itself
+  was removed — it reacts `:staffapproved:` on that ping to close it out, the same
+  auto-approval the advert re-check does for edited ads. It needs **Add Reactions**
+  in the notify channel; posts flagged before a warning was tracked (or before
+  this shipped) just clear silently. A post *deleted for still being in violation*
+  is not approved (it was enforced, not fixed).
 - **Auto-deletion (enforcement):** `LINK_CHECK_GRACE_HOURS` (default `24`) is the
   grace period between the first warning and the bot **deleting** the post if it's
   still in violation. With the daily sweep that's: warned on day 1, deleted on

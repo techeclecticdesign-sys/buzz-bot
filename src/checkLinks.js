@@ -15,6 +15,10 @@ const db = require('./db');
 const { pool } = db;
 const infractionSticky = require('./infractionSticky');
 const config = require('./config');
+// Just for the shared :staffapproved: emoji — the same auto-approval flag the
+// advert re-check stamps on a #rule_infractions ping when an ad is fixed. Reused
+// here so a fixed dead link / removed duplicate closes its warning ping the same way.
+const { SHARED } = require('./advertConfig');
 
 // Grace window (hours) between first warning an author about a dead link and
 // deleting the post if it's still dead. 0 disables auto-deletion (warn/report
@@ -213,18 +217,40 @@ async function enforce(
     if (!firstSighting) continue;
     try {
       const sent = await channel.send({ content: warn, allowedMentions: { parse: ['users'] } });
-      // Record the ping for our own expiry sweep (YAGPDB's expiry skips bot posts).
-      if (sent) await db.recordInfractionPost(sent.id, sent.channelId).catch(() => {});
+      // Record the ping for our own expiry sweep (YAGPDB's expiry skips bot posts)
+      // and against the flag, so a later sweep can mark it :staffapproved: on fix.
+      if (sent) {
+        await db.recordInfractionPost(sent.id, sent.channelId).catch(() => {});
+        await db.setFlagNotice(row.id, reason, sent.id).catch(() => {});
+      }
       warned++;
     } catch (err) {
       console.error(`  ! notify failed for post ${row.id}: ${err.message}`);
     }
     await sleep(DELAY_MS);
   }
-  // Un-flag posts no longer in violation (fixed/removed) so a re-offense starts
-  // a fresh clock; an empty id set clears every stamp of this reason.
-  await db.clearResolvedFlaggedPosts([...new Set([...ids, ...preserveIds])], reason);
+  // Un-flag posts no longer in violation (fixed/removed) so a re-offense starts a
+  // fresh clock; an empty id set clears every stamp of this reason. Each cleared
+  // row is a resolved offense — mark its warning ping :staffapproved: to close it
+  // out (the auto-approval the advert re-check does when an edited ad is fixed).
+  const resolved = await db.clearResolvedFlaggedPosts([...new Set([...ids, ...preserveIds])], reason);
+  await approveResolvedNotices(channel, resolved);
   return { warned, deleted };
+}
+
+// Mark the #rule_infractions warning pings of just-resolved posts :staffapproved:.
+// `resolved` is the rows clearResolvedFlaggedPosts removed (posts fixed or deleted
+// since the last sweep); each may carry the id of the ping we posted when first
+// warning. Best-effort, mirroring the advert re-check's approvePing — every failure
+// is non-fatal. Skipped when the notify channel is off, the emoji is unset, or a row
+// predates notice tracking (notice_id NULL). Needs Add Reactions in the channel.
+async function approveResolvedNotices(channel, resolved) {
+  if (!channel?.messages || !SHARED.staffApprovedEmoji || !resolved?.length) return;
+  for (const { notice_id: noticeId } of resolved) {
+    if (!noticeId) continue;
+    const ping = await channel.messages.fetch(noticeId).catch(() => null);
+    if (ping) await ping.react(SHARED.staffApprovedEmoji).catch(() => {});
+  }
 }
 
 // Run one full sweep using an already-connected client. Never logs out, ends

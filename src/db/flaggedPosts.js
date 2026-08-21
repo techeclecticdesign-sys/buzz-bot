@@ -29,11 +29,29 @@ async function clearFlaggedPosts(messageIds, reason) {
   await query('DELETE FROM flagged_posts WHERE reason = $1 AND message_id = ANY($2)', [reason, messageIds]);
 }
 
+// Record the id of the #rule_infractions warning ping we posted for a flagged
+// post, so a later sweep can mark that ping :staffapproved: once the post is
+// fixed. Called right after the first-sighting warning is sent (the row already
+// exists from flagPost). No-op if the row is gone.
+async function setFlagNotice(messageId, reason, noticeId) {
+  await query('UPDATE flagged_posts SET notice_id = $3 WHERE message_id = $1 AND reason = $2', [
+    messageId,
+    reason,
+    noticeId,
+  ]);
+}
+
 // Drop stamps for this reason on every tracked post NOT in the current
 // still-in-violation set — i.e. posts fixed or removed since last sweep — so a
 // later re-offense starts a fresh clock. An empty set clears all of this reason.
+// Returns the cleared rows (message_id + the warning-ping notice_id) so the
+// caller can mark each fixed post's ping :staffapproved:.
 async function clearResolvedFlaggedPosts(currentIds, reason) {
-  await query('DELETE FROM flagged_posts WHERE reason = $1 AND NOT (message_id = ANY($2))', [reason, currentIds]);
+  const { rows } = await query(
+    'DELETE FROM flagged_posts WHERE reason = $1 AND NOT (message_id = ANY($2)) RETURNING message_id, notice_id',
+    [reason, currentIds]
+  );
+  return rows;
 }
 
 // Every currently-tracked post for one reason (message + channel + author + when
@@ -52,6 +70,7 @@ module.exports = {
   getFlaggedPosts,
   flagPost,
   clearFlaggedPosts,
+  setFlagNotice,
   clearResolvedFlaggedPosts,
   getFlaggedPostsByReason,
 };

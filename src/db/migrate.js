@@ -62,9 +62,16 @@ async function init() {
       channel_id       TEXT NOT NULL,
       author_id        TEXT,
       first_flagged_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      -- The #rule_infractions warning ping we posted for this offense, so a later
+      -- sweep can mark it :staffapproved: once the post is fixed (the same
+      -- auto-approval the advert re-check does). NULL for posts flagged before
+      -- this shipped or when notifications are off (report-only).
+      notice_id        TEXT,
       PRIMARY KEY (message_id, reason)
     );
   `);
+  // Add the warning-ping id to older DBs (nullable — legacy flags never get one).
+  await pool.query('ALTER TABLE flagged_posts ADD COLUMN IF NOT EXISTS notice_id TEXT;');
   // Migration: fold legacy dead_link_posts into flagged_posts, then drop it.
   await pool.query(`
     DO $$ BEGIN
