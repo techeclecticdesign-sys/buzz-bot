@@ -28,6 +28,19 @@ async function setUserState(userId, username, globalName) {
   );
 }
 
+// Departed users: same reasoning as deleteMemberState / pruneDepartedMemberState.
+async function deleteUserState(userId) {
+  await query('DELETE FROM user_state WHERE user_id = $1', [userId]);
+}
+
+async function pruneDepartedUserState(presentIds) {
+  const res = await query(
+    'DELETE FROM user_state WHERE NOT (user_id = ANY($1::text[]))',
+    [presentIds]
+  );
+  return res.rowCount;
+}
+
 async function recordNameChange(userId, userTag, kind, oldValue, newValue) {
   await query(
     `INSERT INTO name_history (user_id, user_tag, kind, old_value, new_value)
@@ -40,5 +53,7 @@ module.exports = {
   getUserState,
   seedUserState,
   setUserState,
+  deleteUserState,
+  pruneDepartedUserState,
   recordNameChange,
 };

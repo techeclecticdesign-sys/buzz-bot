@@ -43,14 +43,25 @@ function bannedHits(content, banned) {
 // literal) and ">>> " doesn't require the space, so one strip pass matches
 // what Discord actually shows.
 const QUOTE_RE = /^ *(?:>>>\s*|>\s+)/;
+// "-# " is Discord's subtext marker — another line-start prefix. A heading
+// hidden behind it ("-# ## TITLE") still renders as a heading, so strip one
+// after the quote strip. A plain subtext line ("-# small print") just loses its
+// "-#" and then has no leading #, so it's correctly NOT counted as a header.
+const SUBTEXT_RE = /^ *-#\s+/;
 // 1-3 #'s (4+ render literally) then whitespace + text, or a bare marker with
 // nothing after it — Discord then renders the NEXT line as the heading text.
 const HEADER_RE = /^ *(#{1,3})(?:\s+(\S.*?))?\s*$/;
 
+// Strip one level of quote markup, then one subtext marker, so the #-test sees
+// what Discord renders regardless of those line-start prefixes.
+function stripLinePrefix(line) {
+  return (line || '').replace(QUOTE_RE, '').replace(SUBTEXT_RE, '');
+}
+
 // {level, body} when the line renders as a heading, else null.
 // body === '' means a bare marker (heading text comes from the next line).
 function headerMatch(line) {
-  const m = HEADER_RE.exec((line || '').replace(QUOTE_RE, ''));
+  const m = HEADER_RE.exec(stripLinePrefix(line));
   return m ? { level: m[1].length, body: m[2] || '' } : null;
 }
 
@@ -79,7 +90,7 @@ function groupHeaderIssue(content) {
     let body = m.body;
     if (!body) {
       const next = i + 1 < lines.length ? lines[i + 1] : '';
-      body = next.replace(QUOTE_RE, '').trim();
+      body = stripLinePrefix(next).trim();
       if (!body) continue;
     }
     headers.push({ level: m.level, body });

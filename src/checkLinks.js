@@ -15,6 +15,7 @@ const db = require('./db');
 const { pool } = db;
 const infractionSticky = require('./infractionSticky');
 const config = require('./config');
+const { rememberBotDelete, forgetBotDelete } = require('./botDeleteAttribution');
 // Just for the shared :staffapproved: emoji — the same auto-approval flag the
 // advert re-check stamps on a #rule_infractions ping when an ad is fixed. Reused
 // here so a fixed dead link / removed duplicate closes its warning ping the same way.
@@ -61,16 +62,18 @@ function isTargeted(channel) {
   return false;
 }
 
-// Delete a dead-link post from its source channel. Returns true when the post
+// Delete an offending post from its source channel. Returns true when the post
 // is gone (including "already deleted"), false on a real failure so the caller
 // keeps the grace flag and retries next sweep. Needs Manage Messages.
-async function deletePost(client, row) {
+async function deletePost(client, row, reason) {
   try {
     const channel = await client.channels.fetch(row.channel_id);
     if (!channel?.isTextBased()) return false;
+    rememberBotDelete(row.id, reason);
     await channel.messages.delete(row.id);
     return true;
   } catch (err) {
+    forgetBotDelete(row.id);
     if (err.code === 10008) return true; // Unknown Message — already gone
     console.error(`  ! delete failed for post ${row.id}: ${err.message}`);
     return false;
@@ -133,6 +136,14 @@ const postTime = (row) => (row.created_at ? new Date(row.created_at).getTime() :
 // Shared by both sweeps so wording stays identical.
 const jumpLink = (guildId, row) => `https://discord.com/channels/${guildId}/${row.channel_id}/${row.id}`;
 const mention = (row, fallback) => (row.author_id ? `<@${row.author_id}>` : (row.author_tag ?? fallback));
+const DELETE_REASON_TEXT = {
+  dead_link: 'Dead link',
+  dup_server: 'Server advertised in multiple channels',
+};
+
+function deleteReasonText(reason) {
+  return DELETE_REASON_TEXT[reason] ?? String(reason).replace(/_/g, ' ');
+}
 
 // Resolve one invite code to 'alive' | 'dead' | 'error'. 'dead' is returned ONLY
 // for a genuine Unknown Invite (404 / 10006); every other failure is 'error' —
@@ -200,7 +211,7 @@ async function enforce(
     // Past the grace window and still in violation → remove the post silently.
     // No removal notice is posted to the channel (it would call out the member).
     if (autoDelete && expired) {
-      const ok = await deletePost(client, row);
+      const ok = await deletePost(client, row, deleteReasonText(reason));
       if (ok) {
         deleted++;
         await db.clearFlaggedPosts([row.id], reason);

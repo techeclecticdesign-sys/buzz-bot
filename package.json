@@ -12,7 +12,12 @@
     "export-json": "node src/exportJson.js",
     "member-stats": "node src/memberStats.js",
     "member-stats:catchup": "node src/memberStats.js --incremental",
-    "check-links": "node src/checkLinks.js"
+    "backfill:ages": "node src/memberAges.js",
+    "check-links": "node src/checkLinks.js",
+    "label:dry": "node src/advertLabeller.js --dry-run",
+    "label:once": "node src/advertLabeller.js --once",
+    "label:all": "node src/advertLabeller.js --all",
+    "label:status": "node src/advertLabeller.js --status"
   },
   "engines": {
     "node": ">=18"
@@ -20,9 +25,13 @@
   "dependencies": {
     "discord.js": "^14.26.5",
     "dotenv": "^16.4.5",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "sharp": "^0.34.5"
   },
   "overrides": {
     "undici": "^6.27.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
   }
 }

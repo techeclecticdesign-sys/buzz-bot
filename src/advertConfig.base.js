@@ -63,6 +63,9 @@ function build(opts) {
       quick_fandoms: { name: 'fandom_adverts', id: '504322252611780609' },
       quick_originals: { name: 'original_adverts', id: '504322272618610688' },
     },
+    // Channels whose adverts the AI keyword labeller reads (advertLabeller.js).
+    // Unset = every advert channel. LABEL_CHANNELS overrides it.
+    labelChannels,
   } = opts;
 
   const SHARED = {
@@ -95,6 +98,9 @@ function build(opts) {
     TYPES,
     QUICK_LONGFORM_BY_NAME: quickLongformByName,
     ALL_ADVERT_CHANNELS,
+    LABEL_CHANNELS: labelChannels ?? ALL_ADVERT_CHANNELS,
+    // Every one-on-one advert channel (long-form + quick), for the same-fandom report.
+    ONE_ON_ONE_CHANNELS: [...oneOnOneChannels, ...quickChannels],
     INTRO,
     typeForChannel(channelId) {
       const key = CHANNEL_TYPE.get(channelId);

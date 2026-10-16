@@ -10,6 +10,8 @@
 const config = require('./config');
 
 const ids = new Set(config.idList('IGNORE_CHANNELS'));
+// Age declarations have their own minimal per-member storage, never a transcript.
+ids.add((process.env.AGE_VERIFY_CHANNEL_ID || '735579435000004747').trim());
 
 // True if this channel (or its category / thread-parent) is on the ignore list.
 // Accepts a discord.js channel; safe to call with null/undefined.

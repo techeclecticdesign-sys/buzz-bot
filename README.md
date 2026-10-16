@@ -66,6 +66,16 @@ after two) so a free database can keep up — see [Database retention](#database
   checks on every advert-channel edit — **whether or not YAGPDB is online** — so
   that hole is closed permanently. See
   [Advert checks on edits](#advert-checks-on-edits).
+- **Mod approval bridge:** optional local HTTP endpoint used by `rpc-web`'s
+  Mod View. When enabled, staff approval clicks ask this bot to add
+  `:staffapproved:` or `:staffpending:` to the Discord advert and refresh the
+  stored reaction summary.
+- **Questionnaire bridge:** forwards posts in Discord that use the `:user:`
+  mention line followed by `### Question` / answer blocks to a Google Apps
+  Script web app as structured JSON. The Sheet script controls where data goes,
+  how it is styled, and any future expansion into multiple rows.
+- **Marketer pfp guard:** kicks anyone who joins wearing the profile picture of a
+  known marketer account. See [Marketer pfp guard](#marketer-pfp-guard).
 
 ## Setup
 
@@ -174,6 +184,33 @@ This is not a background service: the bot only runs while the window is open. To
 have it run unattended / survive reboots, use the free host in
 [step 6](#6-deploy-to-the-free-host) instead.
 
+## Member ages
+
+Current members already have a `member_state` row for their roles, nickname and
+display name. Age tracking adds `age_stated`, `age_stated_at` (the original
+Discord message timestamp) and `age_message_id` to that row. It accepts only a
+whole two-digit number from 15 through 99 in channel `735579435000004747` (or
+`AGE_VERIFY_CHANNEL_ID` when set). The newest valid declaration wins. General
+member/name updates preserve these age fields.
+
+The bot scans the channel's history on startup for current members, and captures
+new declarations even when the channel is ignored by the archive or YAGPDB is
+online. Raw age-channel messages are excluded from the archive. A leave, kick
+or ban deletes the member's current baseline, including the age; full member
+reconciliation at startup also cleans up departures missed while offline.
+Existing moderation history follows its existing retention rules.
+
+Run `npm run backfill:ages` to backfill immediately with the bot's `.env`; it
+updates only the member age schema/data and does not run the other bot features.
+It requires Guild Members and Message Content intents, and View Channel / Read
+Message History permission. `MEMBER_AGES_ENABLED=false` disables automatic age
+tracking (the manual backfill command remains available).
+
+rpc-web uses this dated age to decide who may use minor filters. The calculation
+adds completed calendar anniversaries in US Eastern time; a May 5 statement
+ages up on May 5, and a February 29 statement ages up on March 1 in a non-leap
+year. Advert matching uses Claude's separate `advert_labels.author_age` field.
+
 ## Failsafe (YAGPDB backup)
 
 The server's automation normally runs on **YAGPDB** (nicknamed "Jarvis"). This
@@ -271,6 +308,40 @@ offline. It doesn't debounce brief YAGPDB reconnects; because a reconnect
 usually doesn't flip Discord presence to "offline," this is rarely an issue, but
 a "must be offline for N seconds" guard can be added if it ever misfires.
 
+## Marketer pfp guard
+
+Every join's avatar is compared with the banned pictures in the `marketer_pfps`
+table. A match kicks the member and posts a report showing their avatar next to
+the banned picture. Runs whether or not YAGPDB is online.
+
+Matching uses a perceptual hash, so the enlarged image you download from Discord
+still matches the smaller avatar the bot fetches, even at a different size or
+format. Measured on 250 real member avatars, the same picture re-served by
+Discord was 0-6 bits apart (out of 64), and no two different avatars were closer
+than 14. The default limit is 8. A mirrored or heavily cropped copy won't match.
+
+Staff commands (server owner or `MOD_ROLES`):
+
+- **`>>pfpban <image | link | @user | id> [note]`** adds pictures. Attach the
+  downloaded image, paste its Discord image link, or name a user (their current
+  avatar is taken, which works for banned users too). Extra words become the note.
+  Several pictures can be added at once. Plain images such as a solid colour are
+  refused because they would match unrelated plain avatars.
+- **`>>pfplist`** lists the entries with their kick counts. **`>>pfplist 3`**
+  shows entry #3's picture.
+- **`>>pfpunban 3`** removes entry #3.
+- **`>>pfpcheck <image | link | @user | id>`** shows the closest entry and
+  whether it would kick, without kicking anyone.
+
+| Env var | Default | |
+|---|---|---|
+| `PFP_GUARD_ENABLED` | `true` | `false` turns off the join check |
+| `PFP_GUARD_KICK` | `true` | `false` reports matches without kicking |
+| `PFP_MATCH_MAX_DISTANCE` | `8` | bits (0-20); higher catches more edits but risks false matches |
+| `PFP_GUARD_LOG_CHANNEL_ID` | log channel | where match reports go; set it so reports show even while log channel posting is off |
+
+Needs **Kick Members**.
+
 ## Advert checks on edits
 
 Running a custom command on a **message edit** is a YAGPDB *premium* feature, so
@@ -355,6 +426,78 @@ bounced rule-breaking adverts during a YAGPDB outage.)
   deletes in batches so a large first run can't lock the table. Set
   `DB_RETENTION_ENABLED=false` to keep everything forever (mind your Neon
   storage).
+
+## AI advert keywords
+
+Every advert in the eleven browse channels gets AI keywords: which of 14
+categories it offers (the ten genres plus Romantic, Platonic, NSFW and SFW) and
+the fandoms it names. rpc-web shows them to staff (the **Keywords** button on
+each advert) and filters on them (**Add filter → Advert content**, and the
+**All** mode).
+
+How it works (`src/advertLabeller.js`):
+
+- Each day from `LABEL_HOUR` (**8am US Eastern**, DST-aware) the bot sends the
+  adverts that have no keywords yet to a **Claude Code routine** through its
+  fire API, ~45 per batch, one batch at a time, until everything posted before
+  8am is done. The first run works through the whole backlog.
+- The routine labels the batch and writes the results itself, by calling the
+  database function `labeller_api.submit_advert_labels()` over Supabase's REST
+  API. The Data API exposes **only** the `labeller_api` schema, which holds that
+  one function, so nothing else in the database is reachable through the API;
+  the tables themselves are closed too (RLS, no grants).
+- **Identical text is never sent twice**: a repost or bump reuses the labels
+  of the earlier post (matched on the same text hash as repost approval).
+  **Edited text is sent again** at the next run.
+- **Any failure ends the day's run** — a refused fire, a usage limit, a batch
+  the routine never submits (expired after `LABEL_STALE_HOURS`). The rest waits
+  for tomorrow's run.
+- **Same-fandom report** (`src/fandomReport.js`): once the day's run is over,
+  the bot posts to `FANDOM_REPORT_CHANNEL_ID` (**#bot_spam**) one line per pair
+  of standing one-on-one adverts by the same poster that share a fandom:
+  `@poster <newer ad link> <older ad link>`. Only pairs with an advert labelled
+  since the last report are listed, so each shows up once. The first post pings
+  the user ids in `ADREVIEWERS`; the posters' mentions don't ping;
+  past 2000 characters it continues in another post. `node src/fandomReport.js
+  --since YYYY-MM-DD` prints what it would list without posting.
+
+Tables: `advert_label_batches` (one per fire), `advert_labels` (one per advert
+per prompt version), `advert_labeller_secret` (sha256 of `LABELLER_TOKEN`),
+`advert_fandom_reports` (one per day's same-fandom report). They are created at
+boot like everything else; the migration only ever adds.
+
+The routine can also return `author_age` for each advert: an exact, self-stated
+writer age (integer 1-120), or `null` when unknown. It is stored on
+`advert_labels.author_age`, associated with that message and prompt version,
+and copied with the labels when identical text is reposted. It describes the
+age stated in that post, not a verified or automatically advancing member age.
+Experience durations, partner age preferences, age gates and character ages
+are excluded by the routine's instructions.
+
+The complete prompt is in [docs/advert-labeller-routine.md](docs/advert-labeller-routine.md).
+To enable age extraction, deploy the updated bot files and restart the bot
+first (this adds the column and updates the submission function), then replace
+the Claude routine's instructions with that file. Keep `LABEL_PROMPT_VERSION`
+at `rpc14-v1`; this optional field is compatible with the old payload. These
+local changes do not update the hosted routine themselves. Older submissions
+that omit the field still work and store a null age. Existing labelled adverts
+are not automatically sent again solely for this new field; neither is a
+repost whose labels were inherited from an older result without an age.
+
+Cleanup is part of the daily retention prune. A label is kept while its advert
+stands; once the advert is gone it's remembered for `LABEL_RETENTION_DAYS`
+(**default 90**) after it was labelled, so a repost in that time reuses it, then
+deleted. Labels of a retired prompt version and finished batches go after the
+same window.
+
+Off unless `LABEL_ENABLED=true`. Settings and setup are in `.env.example`.
+Manual commands (no Discord login):
+
+```bash
+npm run label:dry                 # build the next batch, log ids + size, fire nothing
+npm run label:once -- --limit 5   # fire one small batch now
+npm run label:status              # the last 10 batches
+```
 
 ## Invite-link sweep (dead links + duplicate servers)
 

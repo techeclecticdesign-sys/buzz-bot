@@ -26,22 +26,32 @@ const linkCheck = require('./checkLinks');
 const memberStats = require('./memberStatsCollector');
 const game = require('./game');
 const polls = require('./polls');
+const adultCheck = require('./adultCheck');
+const surveySubmissions = require('./surveySubmissions');
+const advertReconcile = require('./advertReconcile');
+const advertLabeller = require('./advertLabeller');
+const fandomReport = require('./fandomReport');
+const pfpGuard = require('./pfpGuard');
 const { sleep } = require('./util');
 const { DESC_MAX, truncate, splitTruncate, attachmentList } = require('./format');
 const { memberJoinEmbed, memberLeaveEmbed, buildSettingsMessage } = require('./embeds');
 const { findDeleteExecutor, primeAuditCounts } = require('./auditLog');
+const { consumeBotDelete } = require('./botDeleteAttribution');
 const memberTracking = require('./memberTracking');
+const memberAgesFactory = require('./memberAges');
+const memberAges = memberAgesFactory.create();
 const { memberRoleIds, queueMemberChange } = memberTracking;
 const commands = require('./commands');
 const { PREFIX, NICK_PREFIX, handleCommand, handleNickPrefixCommand } = commands;
 const advertSyncFactory = require('./advertSync');
+const tcgApprovalFactory = require('./tcgApproval');
 
 const { TOKEN, LOG_CHANNEL_ID, IGNORE_BOTS, LOGGING_ENABLED } = config;
 
-// Intents are requested per enabled feature, so a game-only bot needs no
-// privileged intents. Logging and the failsafe both read messages/members; the
+// Intents are requested per enabled feature. Logging, age tracking and the
+// failsafe read messages/members; the
 // failsafe additionally needs presence to see whether YAGPDB is online.
-const needMessageIntents = LOGGING_ENABLED || failsafe.ENABLED;
+const needMessageIntents = LOGGING_ENABLED || failsafe.ENABLED || surveySubmissions.enabled || memberAgesFactory.ENABLED;
 const intents = [GatewayIntentBits.Guilds];
 if (needMessageIntents) {
   intents.push(
@@ -52,6 +62,10 @@ if (needMessageIntents) {
     // step, and keeping advert posts' reaction counts current for rpc-web.
     GatewayIntentBits.GuildMessageReactions
   );
+}
+// The pfp guard only needs join events.
+if (pfpGuard.ENABLED && !intents.includes(GatewayIntentBits.GuildMembers)) {
+  intents.push(GatewayIntentBits.GuildMembers);
 }
 // Presence sees whether YAGPDB is online (drives the failsafes).
 if (failsafe.ENABLED) {
@@ -75,6 +89,11 @@ const { trackMemberChanges, trackUserNameChanges } = memberTracking.create({ sen
 const advertSync = advertSyncFactory.create({
   loggingEnabled: LOGGING_ENABLED,
   advertChannelSet: ADVERT_CHANNEL_SET,
+  advertConfig,
+});
+const tcgApproval = tcgApprovalFactory.create({
+  client,
+  emojiId: advertSyncFactory.parseEmojiId(advertConfig.SHARED?.staffApprovedEmoji),
 });
 
 async function sendLog(payload) {
@@ -90,8 +109,18 @@ async function sendLog(payload) {
   }
 }
 
+async function botDeletedByLine(guild) {
+  let displayName = client.user?.username ?? 'logger-bot';
+  if (guild?.members) {
+    const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+    displayName = me?.displayName ?? displayName;
+  }
+  return displayName;
+}
+
 function shouldTrack(message) {
   if (!message.guildId) return false; // ignore DMs
+  if (message.channelId === memberAgesFactory.CHANNEL_ID) return false; // age baseline only; no raw archive
   if (message.channelId === LOG_CHANNEL_ID) return false; // avoid feedback loops
   if (isIgnoredMessage(message)) return false; // IGNORE_CHANNELS opt-out
   if (message.author?.id === client.user.id) return false;
@@ -100,6 +129,11 @@ function shouldTrack(message) {
 }
 
 client.on('messageCreate', async (message) => {
+  try {
+    await memberAges.onMessage(message);
+  } catch (err) {
+    console.error('[member-ages] live update failed:', err.message);
+  }
   // #rule_infractions sticky cleanup: when anyone other than logger-bot posts
   // there, YAGPDB owns the sticky again, so drop any copycat we left. Runs before
   // the shouldTrack gate because #rule_infractions may be an ignored channel.
@@ -111,6 +145,24 @@ client.on('messageCreate', async (message) => {
   if (message.guildId && !message.author.bot) {
     if (message.content.startsWith(PREFIX)) await handleCommand(message);
     else if (message.content.startsWith(NICK_PREFIX)) await handleNickPrefixCommand(message);
+  }
+  // Onboarding failsafe: age verification in the age channel. Runs BEFORE the
+  // shouldTrack gate because the age channel is (deliberately) in IGNORE_CHANNELS
+  // for privacy — otherwise the age→Rules Please advance would never fire there.
+  // It self-gates on YAGPDB being offline and the channel/member matching, and it
+  // never archives the message, so the privacy intent is preserved.
+  try {
+    await onboardingFailsafe.handleAgeMessage(message, sendLog);
+  } catch (err) {
+    console.error('[onboarding-failsafe] error:', err.message);
+  }
+  // Questionnaire posts may be sent by a webhook/bot and their channel can be
+  // ignored by the archive, so this runs before shouldTrack(). The handler is
+  // inert until both the Apps Script URL and its shared secret are configured.
+  try {
+    await surveySubmissions.handleMessage(message);
+  } catch (err) {
+    console.error('[survey-submissions] handler error:', err.message);
   }
   if (!shouldTrack(message)) return;
   if (LOGGING_ENABLED) {
@@ -137,13 +189,6 @@ client.on('messageCreate', async (message) => {
     await advertFailsafe.handleIntro(message, sendLog);
   } catch (err) {
     console.error('[intro-failsafe] error:', err.message);
-  }
-  // Onboarding failsafe: age verification in the age channel. Self-gates on
-  // YAGPDB being offline and the channel/member matching.
-  try {
-    await onboardingFailsafe.handleAgeMessage(message, sendLog);
-  } catch (err) {
-    console.error('[onboarding-failsafe] error:', err.message);
   }
 });
 
@@ -258,6 +303,7 @@ client.on('messageDelete', async (message) => {
   // The advert failsafe deleted this itself and already logged it — skip the
   // embed. Consumed before the LOGGING_ENABLED guard so the marker never leaks.
   if (advertFailsafe.consumeSuppressedDelete(message.id)) return;
+  const botDelete = consumeBotDelete(message.id);
   if (!LOGGING_ENABLED) return;
   if (message.guildId && message.channelId === LOG_CHANNEL_ID) return;
   // IGNORE_CHANNELS opt-out, matching shouldTrack.
@@ -290,11 +336,17 @@ client.on('messageDelete', async (message) => {
     if (stored?.author_id === client.user.id) return;
 
     const authorId = stored?.author_id ?? message.author?.id ?? null;
-    const executor = await findDeleteExecutor(message.guild, authorId, message.channelId);
-    const deletedBy =
-      executor ? `${executor} (\`${executor.tag}\`)`
-      : executor === null ? 'Not in audit log (deleted either by author or a bot).'
-      : '*unknown*';
+    let executor = null;
+    let deletedBy;
+    if (botDelete) {
+      deletedBy = await botDeletedByLine(message.guild ?? client.guilds.cache.get(message.guildId));
+    } else {
+      executor = await findDeleteExecutor(message.guild, authorId, message.channelId);
+      deletedBy =
+        executor ? `${executor} (\`${executor.tag}\`)`
+        : executor === null ? 'Not in audit log (deleted either by author or a bot).'
+        : '*unknown*';
+    }
 
     // A stored row or a cached (non-partial) message means we know the real
     // content (even if empty — attachment-only messages).
@@ -305,6 +357,7 @@ client.on('messageDelete', async (message) => {
     const meta =
       `**Author:** ${authorLine}\n` +
       `**Deleted by:** ${deletedBy}\n` +
+      (botDelete ? `**Reason:** ${botDelete.reason}\n` : '') +
       `**Channel:** <#${stored?.channel_id ?? message.channelId}>\n` +
       (createdAt ? `**Originally sent:** <t:${Math.floor(new Date(createdAt).getTime() / 1000)}:f>` : '');
 
@@ -326,7 +379,10 @@ client.on('messageDelete', async (message) => {
       type: 'delete',
       id: message.id,
       authorTag: stored?.author_tag ?? message.author?.tag ?? null,
-      deletedBy: executor?.tag ?? (executor === null ? 'author-or-bot' : null),
+      deletedBy: botDelete
+        ? client.user?.tag ?? 'logger-bot'
+        : executor?.tag ?? (executor === null ? 'author-or-bot' : null),
+      deleteReason: botDelete?.reason ?? null,
       content: stored ? stored.content : message.content ?? null,
       at: new Date().toISOString(),
     });
@@ -415,33 +471,63 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
   }
 });
 
-// Keep advert posts' stored reactions current on add/remove/clear. The sync
-// (refetch the message, rewrite its full reaction summary) lives in advertSync,
-// gated to advert channels; these handlers just forward the event.
+// Keep advert posts' stored reactions and trading-card approvals current on
+// add/remove/clear. The syncs live in advertSync (gated to advert channels) and
+// tcgApproval (gated to :staffapproved: on card posts); these just forward.
 client.on(Events.MessageReactionAdd, (reaction) => {
   advertSync.syncAdvertReactions(reaction);
+  tcgApproval.onReaction(reaction);
 });
 client.on(Events.MessageReactionRemove, (reaction) => {
   advertSync.syncAdvertReactions(reaction);
+  tcgApproval.onReaction(reaction);
 });
 client.on(Events.MessageReactionRemoveEmoji, (reaction) => {
   advertSync.syncAdvertReactions(reaction);
+  tcgApproval.onReaction(reaction);
 });
 // Removing all reactions gives a message, not a reaction — clear the column.
 client.on(Events.MessageReactionRemoveAll, (message) => {
   advertSync.clearAdvertReactions(message);
+  tcgApproval.onReactionsCleared(message);
+});
+// A deleted card post or thread unapproves the card.
+client.on(Events.MessageDelete, (message) => {
+  tcgApproval.onDeleted({ messageIds: [message.id] });
+});
+client.on(Events.MessageBulkDelete, (messages) => {
+  tcgApproval.onDeleted({ messageIds: [...messages.keys()] });
+});
+client.on(Events.ThreadDelete, (thread) => {
+  tcgApproval.onDeleted({ channelId: thread.id });
 });
 
 // Seed a baseline for brand-new members so their first nickname/role change is
 // captured (trackMemberChanges only logs once a baseline exists).
 client.on(Events.GuildMemberAdd, async (member) => {
+  memberAges.onJoin(member);
+  if (!LOGGING_ENABLED && memberAgesFactory.ENABLED) {
+    try {
+      await queueMemberChange(`${member.guild.id}:${member.id}`, () => db.seedMemberState(
+        member.id, member.user.tag, member.nickname ?? null, memberRoleIds(member), member.displayName ?? null
+      ));
+    } catch (err) {
+      console.error('[member-add] age baseline error:', err.message);
+    }
+  }
   if (LOGGING_ENABLED) {
     try {
-      await db.seedMemberState(
-        member.id, member.user.tag, member.nickname ?? null,
-        memberRoleIds(member), member.displayName ?? null
-      );
-      await db.seedUserState(member.id, member.user.username, member.user.globalName ?? null);
+      // Queue both immediately so a quick leave cannot delete first and have
+      // a still-running join handler recreate either baseline afterwards.
+      await Promise.all([
+        queueMemberChange(`${member.guild.id}:${member.id}`, () => db.seedMemberState(
+          member.id, member.user.tag, member.nickname ?? null,
+          memberRoleIds(member), member.displayName ?? null
+        )),
+        queueMemberChange(`user:${member.id}`, () => db.seedUserState(
+          member.id, member.user.username, member.user.globalName ?? null
+        )),
+      ]);
     } catch (err) {
       console.error('[member-add] db error:', err.message);
     }
@@ -451,6 +537,12 @@ client.on(Events.GuildMemberAdd, async (member) => {
     } catch (err) {
       console.error('[member-add] log error:', err.message);
     }
+  }
+  // Kick members wearing a banned marketer pfp; a kicked member needs no gate role.
+  try {
+    if (await pfpGuard.handleMemberJoin(member, sendLog)) return;
+  } catch (err) {
+    console.error('[member-add] pfp guard error:', err.message);
   }
   // Assign the Age Please gate role on join instantly (idempotent if YAGPDB also
   // assigns it). Separate try so a DB hiccup above doesn't block it.
@@ -464,8 +556,17 @@ client.on(Events.GuildMemberAdd, async (member) => {
 // Leave card on any departure (leave/kick/ban). memberLeaveEmbed handles a
 // partial/uncached member. Always on; sendLog still honours log_to_channel.
 client.on(Events.GuildMemberRemove, async (member) => {
-  if (!LOGGING_ENABLED) return;
   if (member.user?.id === client.user.id) return; // ignore our own removal
+  // Hard-delete the departed member's baselines (roles/nickname/names). Queued on
+  // the same keys as the change trackers so an in-flight update can't re-write the
+  // row after we drop it. A rejoin then seeds fresh from their actual (empty) roles.
+  try {
+    await memberAges.onLeave(member);
+    await queueMemberChange(`user:${member.id}`, () => db.deleteUserState(member.id));
+  } catch (err) {
+    console.error('[member-remove] db error:', err.message);
+  }
+  if (!LOGGING_ENABLED) return;
   try {
     await sendLog({ embeds: [memberLeaveEmbed(member)] });
   } catch (err) {
@@ -538,11 +639,17 @@ client.on(Events.InteractionCreate, (interaction) => {
   if (polls.ENABLED) polls.handleInteraction(interaction);
 });
 
+// Age-restricted /verify-adult. Self-gates on its command name.
+client.on(Events.InteractionCreate, (interaction) => {
+  if (adultCheck.ENABLED) adultCheck.handleInteraction(interaction);
+});
+
 client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}.`);
   const slashCommands = [];
   if (game.ENABLED) slashCommands.push(...game.commandData());
   if (polls.ENABLED) slashCommands.push(...polls.commandData());
+  if (adultCheck.ENABLED) slashCommands.push(...adultCheck.commandData());
   if (slashCommands.length) {
     for (const guild of client.guilds.cache.values()) {
       try {
@@ -563,11 +670,27 @@ client.once(Events.ClientReady, async () => {
         const members = await guild.members.fetch();
         if (LOGGING_ENABLED) {
           for (const member of members.values()) {
-            await db.seedMemberState(
-              member.id, member.user.tag, member.nickname ?? null,
-              memberRoleIds(member), member.displayName ?? null
-            );
-            await db.seedUserState(member.id, member.user.username, member.user.globalName ?? null);
+            await Promise.all([
+              queueMemberChange(`${guild.id}:${member.id}`, async () => {
+                if (!guild.members.cache.has(member.id)) return;
+                await db.seedMemberState(member.id, member.user.tag, member.nickname ?? null,
+                  memberRoleIds(member), member.displayName ?? null);
+              }),
+              queueMemberChange(`user:${member.id}`, async () => {
+                if (!guild.members.cache.has(member.id)) return;
+                await db.seedUserState(member.id, member.user.username, member.user.globalName ?? null);
+              }),
+            ]);
+          }
+        }
+        // Drop baselines for anyone who left while we were offline. Tables carry
+        // no guild_id, so only safe when this is the bot's only guild.
+        if (client.guilds.cache.size === 1 && members.size > 0) {
+          const present = [...guild.members.cache.keys()];
+          const goneMembers = await db.pruneDepartedMemberState(present);
+          const goneUsers = await db.pruneDepartedUserState(present);
+          if (goneMembers || goneUsers) {
+            console.log(`[seed] dropped ${goneMembers} member_state / ${goneUsers} user_state row(s) for departed members`);
           }
         }
         console.log(`[seed] members primed for ${guild.name} (${members.size})`);
@@ -576,6 +699,10 @@ client.once(Events.ClientReady, async () => {
       }
     }
   }
+  // Catch age declarations missed while offline, including the initial history.
+  // Runs in the background so a long channel scan doesn't delay bot startup.
+  memberAges.backfill(client).catch((err) => console.error('[member-ages] backfill failed:', err.message));
+
   // Prime audit counters so deletes right after a restart aren't misread as
   // self-deletes when a mod's existing audit entry gets incremented.
   if (LOGGING_ENABLED) {
@@ -684,6 +811,22 @@ client.once(Events.ClientReady, async () => {
   // :staffpending: / marks the ping :staffapproved: when fixed, or removes a
   // still-broken post at the terminal stage. Resumes across restarts (DB-backed).
   advertFailsafe.scheduleRechecks(client, sendLog);
+
+  // Daily reconcile: soft-delete adverts that were removed on Discord while the
+  // bot was offline (the gateway never saw the delete). Runs at 3am ET, not on boot.
+  advertReconcile.scheduleAdvertReconcile(client);
+
+  // AI advert keywords: from 8am ET, sends unlabelled adverts to the Claude Code
+  // routine in batches; it writes the labels back itself. Off unless LABEL_ENABLED.
+  // Once a day's run is over, #bot_spam gets the posters with two standing
+  // one-on-one adverts that share a fandom.
+  advertLabeller.scheduleAdvertLabeller({
+    runOver: (run) => fandomReport.run(client, run),
+  });
+
+  // Trading-card approvals: catch up on changes made while offline (not awaited:
+  // one fetch per card), then sweep new cards every few minutes.
+  tcgApproval.start();
 
   // Expire the #rule_infractions pings this bot posts (YAGPDB's sweep skips bot
   // messages, so they'd never age out). No-op until a post is recorded.

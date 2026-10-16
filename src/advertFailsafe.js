@@ -431,7 +431,9 @@ async function handleAdvertEdit(message, sendLog) {
   const lead = isOverLength(type, content) ? [lengthAdvisory(type, message)] : [];
   const posted = await runAdvisories(message, sendLog, type, content, lead, {
     edited: true,
-    lengthNote: lead.length > 0,
+    // The note is about character counting; it's meaningless (and misleading)
+    // on the word-limit quick channels, where a custom emoji is one word.
+    lengthNote: lead.length > 0 && type.lengthMode !== 'words',
     title: 'Advert edit flagged',
     headline: `Flagged an edited advert to <#${SHARED.infractionsChannelId}>.`,
   });

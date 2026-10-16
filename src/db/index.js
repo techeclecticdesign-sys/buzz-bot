@@ -10,6 +10,10 @@
 //   settings.js     per-guild logging preferences
 //   flaggedPosts.js link-check grace tracking
 //   infractions.js  advert re-check queue + #rule_infractions ledger
+//   approvals.js    approved advert-text hashes (repost recognition)
+//   tcgCards.js     trading-card approval flags (rpc-web's cards)
+//   marketerPfps.js banned marketer profile pictures (pfpGuard)
+//   advertLabels.js AI advert keyword batches + labels (advertLabeller)
 const { pool } = require('./pool');
 const { init } = require('./migrate');
 
@@ -22,4 +26,8 @@ module.exports = {
   ...require('./settings'),
   ...require('./flaggedPosts'),
   ...require('./infractions'),
+  ...require('./approvals'),
+  ...require('./tcgCards'),
+  ...require('./marketerPfps'),
+  ...require('./advertLabels'),
 };

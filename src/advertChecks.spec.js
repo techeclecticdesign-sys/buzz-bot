@@ -72,10 +72,24 @@ test('headerMatch: blockquote evasion is defeated (one quote strip)', () => {
   assert.equal(isHeaderLine('> # x'), true);
 });
 
+test('headerMatch: subtext-marker evasion is defeated (strip -# then #)', () => {
+  // "-# ## TITLE" renders the ## as a heading; the "-# " prefix must be stripped.
+  assert.deepEqual(headerMatch('-# ## Hidden'), { level: 2, body: 'Hidden' });
+  // Combined with a blockquote, as seen in the wild: "> -# ## TITLE".
+  assert.deepEqual(headerMatch('> -# ## Hidden'), { level: 2, body: 'Hidden' });
+  // A plain subtext line is NOT a header — it loses "-#" and has no leading #.
+  assert.equal(headerMatch('-# just small print'), null);
+  assert.equal(headerMatch('> -# small print in a quote'), null);
+});
+
 test('hasAnyHeader: true if any line renders as a header (1x1 / quick rule)', () => {
   assert.equal(hasAnyHeader('all plain\nlines here'), false);
   assert.equal(hasAnyHeader('intro\n## a heading\nmore'), true);
   assert.equal(hasAnyHeader('> # quoted heading'), true);
+  // header hidden behind a subtext marker inside a quote (real evasion)
+  assert.equal(hasAnyHeader('body text\n> -# ## sneaky'), true);
+  // bare subtext must stay legal (rules doc uses "-#" throughout)
+  assert.equal(hasAnyHeader('body text\n-# small print'), false);
 });
 
 test('groupHeaderIssue: at most one header, each within its size cap', () => {

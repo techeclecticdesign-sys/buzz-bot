@@ -5,6 +5,7 @@ const { EmbedBuilder } = require('discord.js');
 const db = require('./db');
 const failsafe = require('./failsafe');
 const onboardingFailsafe = require('./onboardingFailsafe');
+const pfpGuard = require('./pfpGuard');
 const { buildSettingsMessage } = require('./embeds');
 const { DESC_MAX, truncate, fitLines } = require('./format');
 const config = require('./config');
@@ -345,13 +346,15 @@ async function handleNickPrefixCommand(message) {
   const [cmd, ...args] = message.content.slice(NICK_PREFIX.length).trim().split(/\s+/);
   const c = cmd.toLowerCase();
   try {
+    if (await pfpGuard.handleCommand(message, c, args)) return;
     if (c === 'nicknames' || c === 'nicks' || c === 'nick') await handleNicknamesCommand(message, args);
     else if (c === 'roles' || c === 'role') await handleRolesCommand(message, args);
     else if (c === 'settings' || c === 'config') await handleSettingsCommand(message);
     else if (c === 'failsafe' || c === 'jarvis' || c === 'status') await handleFailsafeCommand(message);
     else if (c === 'help' || c === '')
       await message.reply(
-        'Commands: `>>nicknames @user`, `>>roles @user`, `>>settings` (owner), `>>failsafe` (owner)'
+        'Commands: `>>nicknames @user`, `>>roles @user`, `>>settings` (owner), `>>failsafe` (owner), ' +
+        '`>>pfpban` / `>>pfpunban` / `>>pfplist` / `>>pfpcheck` (staff)'
       );
   } catch (err) {
     console.error(`[nick-command] ${cmd} error:`, err.message);

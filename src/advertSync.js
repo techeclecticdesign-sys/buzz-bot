@@ -2,14 +2,66 @@
 // image attachments (bytes + metadata) and the live reaction summary. All of it
 // is best-effort — failures are logged, never thrown into the event handlers.
 //
-// create({ loggingEnabled, advertChannelSet }) injects the two config values the
-// reaction sync needs (image sync needs neither). advertChannelSet is the Set of
-// advert channel IDs whose reactions we mirror.
+// create({ loggingEnabled, advertChannelSet, advertConfig }) injects the config the
+// reaction sync needs (image sync needs none). advertChannelSet is the Set of advert
+// channel IDs whose reactions we mirror; advertConfig drives the approval-hash
+// reconcile (channel type + the :staffapproved: emoji id).
 const db = require('./db');
 const advertImages = require('./advertImages');
 const { reactionSummary } = require('./reactions');
+const { advertContentHash } = require('./advertHash');
 
-function create({ loggingEnabled, advertChannelSet }) {
+// Pull the numeric id out of a "name:id" / "<:name:id>" emoji reference.
+function parseEmojiId(ref) {
+  if (!ref) return null;
+  const m = String(ref).match(/(\d{5,})>?$/);
+  return m ? m[1] : null;
+}
+
+// Does the message currently carry a reaction with this custom-emoji id?
+function messageHasReaction(message, emojiId) {
+  const cache = message && message.reactions && message.reactions.cache;
+  if (!cache) return false;
+  for (const r of cache.values()) {
+    if (r && r.emoji && r.emoji.id === emojiId) return true;
+  }
+  return false;
+}
+
+function create({ loggingEnabled, advertChannelSet, advertConfig }) {
+  // :staffapproved: id, parsed once. Null (reconcile disabled) when no advert
+  // config is present — e.g. a game-only / test instance.
+  const staffApprovedEmojiId = parseEmojiId(advertConfig && advertConfig.SHARED
+    && advertConfig.SHARED.staffApprovedEmoji);
+
+  // group / 1x1 advert channels, but NOT quick (quick posts never get approved).
+  function isNonQuickApprovalChannel(channelId) {
+    const type = advertConfig && advertConfig.typeForChannel(channelId);
+    return !!type && type.name !== 'quick';
+  }
+
+  // Keep advert_approval_hashes in step with the post's current :staffapproved:
+  // state. Called with an authoritative (refetched) message. Converges to truth on
+  // any reaction event, so add / remove / remove-emoji / remove-all all land here.
+  async function reconcileApproval(message) {
+    if (!staffApprovedEmojiId) return;
+    const channelId = message && message.channelId;
+    if (!channelId || !isNonQuickApprovalChannel(channelId)) return;
+    try {
+      const approved = messageHasReaction(message, staffApprovedEmojiId);
+      const authorId = message.author && message.author.id;
+      const hash = approved ? advertContentHash(message.content) : null;
+      if (approved && authorId && hash) {
+        await db.upsertApprovedHash(message.id, authorId, hash, channelId);
+      } else {
+        // Not approved, or nothing to key on (no text / unknown author) → make
+        // sure no stale row lingers. DELETE of a missing row is a cheap no-op.
+        await db.deleteApprovedHash(message.id);
+      }
+    } catch (err) {
+      console.error('[approvals] reconcile error:', err.message);
+    }
+  }
   // Persist (or refresh) the stored image attachments for a GROUP advert post so
   // the browse site can show them. No-ops for non-group channels.
   async function syncAdvertImages(message) {
@@ -55,6 +107,7 @@ function create({ loggingEnabled, advertChannelSet }) {
     } catch (err) {
       console.error('[reactions] db error:', err.message);
     }
+    await reconcileApproval(message);
   }
 
   // Removing all reactions gives a message, not a reaction — clear the column.
@@ -66,9 +119,11 @@ function create({ loggingEnabled, advertChannelSet }) {
     } catch (err) {
       console.error('[reactions] db error:', err.message);
     }
+    // Every reaction is gone, so :staffapproved: is too — drop any stored hash.
+    await reconcileApproval(message);
   }
 
   return { syncAdvertImages, reconcileAdvertImages, syncAdvertReactions, clearAdvertReactions };
 }
 
-module.exports = { create };
+module.exports = { create, parseEmojiId, messageHasReaction };

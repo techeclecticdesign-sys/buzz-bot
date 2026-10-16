@@ -1,0 +1,1024 @@
+Age-verification audit — stated age vs. DOB (at time of statement)
+Generated 2026-09-22T02:35:58.315Z
+
+Sheet members with a valid id ......... 4975
+  matched to a channel message ....... 4308
+  had a usable DOB + age statement .... 4305  (verifiable)
+    agreed (no mismatch) ............. 4053
+    FLAGGED mismatch ................. 252
+      stated 15 or 18 on join ........ 23
+      other stated age ............... 229
+  DOB present but never typed an age .. 667
+  matched but no usable DOB in sheet .. 3
+
+==============================================================================
+FLAGGED — initially stated 15 or 18 on join
+==============================================================================
+
+  Horskr  —  member 482041652366803004  (@plumchucker)
+    DOB 2003-07-26  |  stated 18 on 2021-06-23 03:49 UTC  |  actually 17  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/857105123163504641
+
+  UltimateMonkey  —  member 779445902963245076  (@UltimateMonke)
+    DOB 2003-05-14  |  stated 18 on 2021-03-11 20:17 UTC  |  actually 17  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/819665413645271070
+
+  Waffle  —  member 330919411370164226  (@_w4ffle_)
+    DOB 2003-10-12  |  stated 18 on 2021-06-29 18:16 UTC  |  actually 17  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/859497691243347998
+
+  Archy  —  member 369539051449221130  (@Archy9670)
+    DOB 2003-02-01  |  stated 18 on 2020-08-22 19:28 UTC  |  actually 17  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/746813018003734658
+
+  LastSamu  —  member 899813462509760523  (@LastSamu)
+    DOB 2004-11-11  |  stated 18 on 2022-10-28 07:19 UTC  |  actually 17  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1035452738915553300
+
+  Vamp  —  member 508142463450611732  (@vamp1023)
+    DOB 2005-08-16  |  stated 18 on 2023-08-08 18:17 UTC  |  actually 17  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1138536542202233035
+
+  Nine  —  member 380454948124753921  (@DrWhoNine)
+    DOB 2006-02-16  |  stated 15 on 2020-08-22 10:26 UTC  |  actually 14  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/746676677764972565
+
+  Nocturne  —  member 384815484660482049  (@Nocturnethedemon)
+    DOB 2006-08-24  |  stated 18 on 2024-08-10 08:16 UTC  |  actually 17  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1271743891464392746
+
+  ronan  —  member 1260489748623917157  (@theheretic.666)
+    DOB 2007-11-13  |  stated 18 on 2025-10-21 01:55 UTC  |  actually 17  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1430011528131641466
+
+  Dawn  —  member 1361857982123475014  (@poetic_dawn)
+    DOB 2007-08-28  |  stated 18 on 2025-06-12 04:22 UTC  |  actually 17  |  claimed OLDER by 1 yr  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1382575707603075102
+
+  xpunksnotdeadx  —  member 404463154639142922  (@xpunksnotdeadx)
+    DOB 2007-11-15  |  stated 15 on 2022-08-23 22:39 UTC  |  actually 14  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1011766756865474590
+
+  some invisible icon  —  member 891556710349701161  (@afterrcare)
+    DOB 2007-08-18  |  stated 18 on 2025-07-07 20:17 UTC  |  actually 17  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1391875793570758852
+
+  Jekyll . . . 🧪  —  member 861005085013442571  (@jekyll_0r_hyde)
+    DOB 2008-08-09  |  stated 15 on 2022-09-19 03:24 UTC  |  actually 14  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1021260525016985661
+
+  Lucyy <3  —  member 1285794580192825437  (@luciivian)
+    DOB 2008-08-07  |  stated 18 on 2026-08-06 07:01 UTC  |  actually 17  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1534818573523095665
+
+  Moondrop  —  member 377541769459531809  (@Chronically_Online#5377)
+    DOB 2003-01-13  |  stated 18 on 2022-01-18 17:47 UTC  |  actually 19  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/933055016342814730
+
+  Jalen  —  member 235941943945723904  (@StraightCashHomie)
+    DOB 2003-02-01  |  stated 18 on 2022-02-01 00:04 UTC  |  actually 19  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/937860865678520360
+
+  Ann:vv  —  member 1160727185296986122  (@eenlyy.y)
+    DOB 2006-01-10  |  stated 18 on 2025-02-28 06:25 UTC  |  actually 19  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1344918385112121434
+
+  Eni  —  member 1489224053498843136  (@Peepstwozero)
+    DOB 2007-04-03  |  stated 18 on 2026-04-03 03:13 UTC  |  actually 19  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1489462770121445547
+
+  Lila  —  member 838827958058876940  (@raccoon.bats)
+    DOB 2006-08-27  |  stated 18 on 2026-05-25 02:32 UTC  |  actually 19  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1508296619920195644
+
+  Kei Tachibana  —  member 890758566896615484  (@kei_cant_spell)
+    DOB 2007-08-07  |  stated 18 on 2026-09-06 02:28 UTC  |  actually 19  |  claimed younger by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1545983902269706360
+
+  Yihua Li  —  member 891418651394187405  (@Yihua Li)
+    DOB 1999-05-20  |  stated 18 on 2022-04-25 09:58 UTC  |  actually 22  |  claimed younger by 4 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/968088564095127582
+
+  L.A.  —  member 914558320830992384  (@onefilthypapi)
+    DOB 2002-09-25  |  stated 18 on 2026-01-18 11:14 UTC  |  actually 23  |  claimed younger by 5 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1462404856965759037
+
+  brett1026  —  member 167772424945926145  (@brett1026)
+    DOB 1999-10-26  |  stated 18 on 2026-05-26 02:49 UTC  |  actually 26  |  claimed younger by 8 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1508663219869319239
+
+  Diona401  —  member 824641920683868180  (@Dioe401)
+    DOB 2026-08-03  |  stated 24 on 2026-08-03 05:45 UTC  |  actually 0  |  claimed OLDER by 24 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1533712428150554814
+
+  neil  —  member 1215812924174630963  (@kornographick)
+    DOB 2025-11-10  |  stated 17 on 2025-11-07 21:53 UTC  |  actually -1  |  claimed OLDER by 18 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1436473710352793710
+
+  sloveminem  —  member 1237021144956276788  (@belgianbalkan)
+    DOB 2026-03-10  |  stated 17 on 2026-03-08 22:26 UTC  |  actually -1  |  claimed OLDER by 18 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1480330805719994429
+
+  Telarc  —  member 1448376278112801010  (@Telarc)
+    DOB 1980-06-05  |  stated 56 on 2025-12-26 21:27 UTC  |  actually 45  |  claimed OLDER by 11 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1454224028524085278
+
+  cain  —  member 755096944015310950  (@cainbug / cain#0015)
+    DOB 2006-03-30  |  stated 28 on 2025-01-19 00:05 UTC  |  actually 18  |  claimed OLDER by 10 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1330327240889598129
+
+  Adam  —  member 152799197442080768  (@consumes_ur_skin)
+    DOB 2005-09-06  |  stated 29 on 2026-08-10 17:29 UTC  |  actually 20  |  claimed OLDER by 9 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1536426159519301642
+
+  Limn  —  member 278483059949699072  (@Limn.)
+    DOB 1989-01-19  |  stated 36 on 2022-05-12 09:08 UTC  |  actually 33  |  claimed OLDER by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/974236686659747871
+
+  Gamma Knife  —  member 498334809660063756  (@gammakrome)
+    DOB 2002-05-02  |  stated 24 on 2024-03-21 01:15 UTC  |  actually 21  |  claimed OLDER by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1220178939729936454
+
+  Stuck  —  member 676017376671694879  (@5u6h0n1l)
+    DOB 2003-08-19  |  stated 21 on 2022-07-07 20:35 UTC  |  actually 18  |  claimed OLDER by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/994703244569886812
+
+  Konuh  —  member 715431251359694879  (@k0nuh)
+    DOB 2007-10-29  |  stated 16 on 2021-04-19 05:08 UTC  |  actually 13  |  claimed OLDER by 3 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/833569626667221035
+
+  Pair of Pears  —  member 181345207768449024  (@pairofpears)
+    DOB 2000-04-14  |  stated 23 on 2022-02-01 21:20 UTC  |  actually 21  |  claimed OLDER by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/938182063662702603
+
+  Louie  —  member 472085267151454216  (@lo.uie.)
+    DOB 2003-03-31  |  stated 23 on 2024-09-22 20:07 UTC  |  actually 21  |  claimed OLDER by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1287505642839609478
+
+  SnootBooper  —  member 474710317427851264  (@snootbooper69)
+    DOB 2003-04-24  |  stated 19 on 2021-03-10 04:51 UTC  |  actually 17  |  claimed OLDER by 2 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/819069913775472650
+
+  Cowboy  —  member 221917043467747328  (@cowboyan)
+    DOB 2002-12-10  |  stated 22 on 2023-04-08 07:57 UTC  |  actually 20  |  claimed OLDER by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1094169141499412541
+
+  vegan sausage  —  member 388404907478089739  (@vegan sausage)
+    DOB 1993-11-13  |  stated 33 on 2025-07-14 10:14 UTC  |  actually 31  |  claimed OLDER by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1394260862222467186
+
+  Fran  —  member 1409282880231702788  (@Fran)
+    DOB 2000-04-12  |  stated 27 on 2025-08-24 21:18 UTC  |  actually 25  |  claimed OLDER by 2 yrs  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1409285721595838655
+
+  emorycore  —  member 900251854594777089  (@emorycore)
+    DOB 2006-12-28  |  stated 19 on 2024-07-05 09:44 UTC  |  actually 17  |  claimed OLDER by 2 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1258720133422252062
+
+  Canadianguy1973  —  member 1011423585375637515  (@Canadianguy6108)
+    DOB 1973-09-28  |  stated 54 on 2026-08-31 06:52 UTC  |  actually 52  |  claimed OLDER by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1543876074587295846
+
+  Jonathan  —  member 466344506888028176  (@_____jonathan)
+    DOB 2006-10-10  |  stated 21 on 2026-09-09 15:36 UTC  |  actually 19  |  claimed OLDER by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1547269476561453146
+
+  JUPITER  —  member 714142554278330398  (@.wytch.)
+    DOB 1984-07-31  |  stated 40 on 2022-11-23 22:56 UTC  |  actually 38  |  claimed OLDER by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1045110666626879601
+
+  Ali  —  member 709141961717842082  (@clever.ghoul)
+    DOB 1993-04-24  |  stated 28 on 2020-12-13 20:05 UTC  |  actually 27  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/787772099787620371
+
+  Shallowness  —  member 524007340748570644  (@Constantshallowness)
+    DOB 1999-03-21  |  stated 22 on 2021-01-24 22:10 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/803023878556876801
+
+  Withintherising  —  member 813149705067823134  (@Withintherising#2226)
+    DOB 1993-08-17  |  stated 28 on 2021-02-22 00:49 UTC  |  actually 27  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/813210888298954822
+
+  Vita  —  member 160683427379675137  (@neurodiverjane)
+    DOB 1989-03-10  |  stated 32 on 2021-01-24 11:25 UTC  |  actually 31  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/802861615656861726
+
+  SunsetAurora  —  member 791497990652428341  (@SunsetAurora)
+    DOB 1998-05-04  |  stated 23 on 2021-04-17 00:06 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/832768995445964800
+
+  Tangle  —  member 184811443462471680  (@T334)
+    DOB 1999-10-18  |  stated 21 on 2020-10-10 03:59 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/764336313121243148
+
+  Kibacju  —  member 477653758248091658  (@luckyducky99)
+    DOB 1999-07-20  |  stated 22 on 2021-07-17 13:54 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/865954717392961556
+
+  Elegant Necessity  —  member 227916503956062218  (@lordbishthe3rd)
+    DOB 1990-04-10  |  stated 31 on 2021-03-23 17:39 UTC  |  actually 30  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/823974255335047229
+
+  GingerWitch  —  member 489939281347870730  (@GingerWitch#1961)
+    DOB 2000-08-04  |  stated 21 on 2021-08-02 08:10 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/871666165129289769
+
+  Isabella Cain  —  member 440904345903431700  (@IsabellaCain)
+    DOB 1994-11-15  |  stated 27 on 2021-08-25 05:02 UTC  |  actually 26  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/879953795730247700
+
+  Gem  —  member 243647753723314176  (@gemenice)
+    DOB 1988-05-28  |  stated 34 on 2022-01-13 13:46 UTC  |  actually 33  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/931182390691369060
+
+  Rez  —  member 300364735495405569  (@reznik)
+    DOB 1989-05-07  |  stated 32 on 2021-04-05 18:25 UTC  |  actually 31  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/828696955374403584
+
+  Pavlovian Response  —  member 618537310300012554  (@PavlovianResponse)
+    DOB 2001-04-04  |  stated 21 on 2022-02-06 23:32 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/940027275271864360
+
+  Kazsth  —  member 543865367500685315  (@_uselessreptile)
+    DOB 1999-08-26  |  stated 23 on 2022-02-21 10:56 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/945272829597872128
+
+  MacGriffin  —  member 944773485048242176  (@MacGriffin#8511)
+    DOB 1991-05-17  |  stated 31 on 2022-03-04 02:09 UTC  |  actually 30  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/949126328660140142
+
+  Dottie  —  member 893691509046648853  (@dottie#9995)
+    DOB 2001-01-26  |  stated 21 on 2021-10-14 20:41 UTC  |  actually 20  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/898309658043879475
+
+  TurtleguyRoleplayAlt  —  member 965072473882251264  (@TurtleguyRoleplayAlt#6910)
+    DOB 1996-06-07  |  stated 26 on 2022-04-17 02:16 UTC  |  actually 25  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/965073136930414682
+
+  DarkestMourning  —  member 309011730972016640  (@DarkestMourning)
+    DOB 2001-05-04  |  stated 21 on 2022-04-29 03:01 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/969433233290846228
+
+  Peep  —  member 925887583664345158  (@p_eep)
+    DOB 2003-08-02  |  stated 19 on 2021-12-29 23:32 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/925894140699492403
+
+  Walkerr  —  member 588852590653997057  (@walkeerrr)
+    DOB 2001-08-01  |  stated 21 on 2022-01-18 22:32 UTC  |  actually 20  |  claimed OLDER by 1 yr  |  typed 4 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/933126627708243998
+
+  SkyFern  —  member 263398282636558336  (@SkyFerrn)
+    DOB 2003-08-15  |  stated 19 on 2022-08-14 06:18 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1008258293342412820
+
+  Dean  —  member 95604147251838976  (@deankus)
+    DOB 1993-12-29  |  stated 29 on 2022-11-12 09:15 UTC  |  actually 28  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1040917776816156686
+
+  Kraszux_exe  —  member 426089212031401996  (@Kraszux_exe#9943)
+    DOB 2004-11-01  |  stated 19 on 2023-01-16 15:21 UTC  |  actually 18  |  claimed OLDER by 1 yr  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1064565064968974457
+
+  Wolf  —  member 954504322903863346  (@tovahwulf)
+    DOB 1999-05-10  |  stated 24 on 2023-04-03 16:23 UTC  |  actually 23  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1092484548480225280
+
+  WeissRaben  —  member 118346841308790784  (@WeissRaben)
+    DOB 1990-04-30  |  stated 33 on 2023-04-06 10:48 UTC  |  actually 32  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1093487454666891316
+
+  Samantha  —  member 597546386103205941  (@samsaramaya)
+    DOB 1996-05-13  |  stated 27 on 2023-04-08 08:35 UTC  |  actually 26  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1094178631946862612
+
+  Conclave  —  member 550124501711585326  (@Conclave#4288)
+    DOB 1998-12-01  |  stated 25 on 2023-01-25 11:00 UTC  |  actually 24  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1067760985600954528
+
+  Peptydy  —  member 922142679712817162  (@Peptydy)
+    DOB 2004-10-11  |  stated 19 on 2023-06-05 16:42 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1115319685064445962
+
+  RathmaReborn  —  member 780132454945259521  (@RathmaReborn)
+    DOB 1995-07-09  |  stated 28 on 2023-05-16 21:23 UTC  |  actually 27  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1108142745714950264
+
+  Zazzles  —  member 340778422949380096  (@zazzyles)
+    DOB 1994-06-13  |  stated 29 on 2023-06-09 12:13 UTC  |  actually 28  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1116701540850335784
+
+  ExoAis  —  member 714765277900046356  (@exoais)
+    DOB 2002-12-03  |  stated 21 on 2023-06-18 13:01 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1119975052725719061
+
+  Nathy  —  member 1123521032175747153  (@frostculture)
+    DOB 2002-04-10  |  stated 22 on 2023-08-17 10:16 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1141676993805566063
+
+  Omelette  —  member 549883878857375745  (@Omelette #6586)
+    DOB 2003-07-10  |  stated 20 on 2023-03-26 11:03 UTC  |  actually 19  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1089504880001036339
+
+  Sol  —  member 249551012837195787  (@solarislunn)
+    DOB 2000-12-19  |  stated 22 on 2022-11-21 22:38 UTC  |  actually 21  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1044381278629265408
+
+  ILikeThemSalty  —  member 496732851228901397  (@ILikeThemSalty)
+    DOB 2001-07-15  |  stated 23 on 2023-12-26 03:05 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1189041199751909406
+
+  Agent Moron  —  member 1229800481489031229  (@ghostcak3s)
+    DOB 2002-04-18  |  stated 22 on 2024-04-16 18:34 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1229862456591913032
+
+  Soul Evans  —  member 772520762753024020  (@Soul Evans#8447)
+    DOB 1999-01-01  |  stated 24 on 2022-05-26 19:34 UTC  |  actually 23  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/979467662730076241
+
+  Sunny  —  member 250077757592174593  (@mycelialnetwork)
+    DOB 2000-12-19  |  stated 23 on 2023-12-17 05:56 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1185822842890227722
+
+  NarratorCordis  —  member 1122162132952285264  (@NarratorCordis)
+    DOB 2003-02-01  |  stated 21 on 2023-06-24 15:40 UTC  |  actually 20  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1122189495639490580
+
+  Shahrukh  —  member 419825826914369538  (@.shahrukh_)
+    DOB 1998-04-11  |  stated 26 on 2024-02-22 02:45 UTC  |  actually 25  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1210054767922126848
+
+  Nahadoth  —  member 690059498882072624  (@Nahadoth)
+    DOB 1992-02-07  |  stated 33 on 2024-03-29 23:47 UTC  |  actually 32  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1223418332561145926
+
+  Luna  —  member 470386334842880010  (@lunarlion14)
+    DOB 1990-04-16  |  stated 34 on 2024-04-12 15:41 UTC  |  actually 33  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1228369512588644433
+
+  Bowie  —  member 526081321303539712  (@bowieissocool)
+    DOB 2001-05-31  |  stated 23 on 2024-05-23 17:01 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1243247448953192479
+
+  Felu  —  member 218459812218929152  (@felu.)
+    DOB 1998-11-22  |  stated 26 on 2024-07-01 15:27 UTC  |  actually 25  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1257356821283471410
+
+  Stat  —  member 636646142506958860  (@starthefire)
+    DOB 2001-10-06  |  stated 20 on 2021-09-19 16:55 UTC  |  actually 19  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/889192869494136903
+
+  iiam.lina  —  member 961271955959459920  (@iiam.lina)
+    DOB 2005-07-05  |  stated 19 on 2024-01-09 01:25 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1194089443037028412
+
+  Skittycat  —  member 1189833041279983676  (@Skittycat__)
+    DOB 2005-06-25  |  stated 19 on 2024-03-28 14:28 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1222915291261173781
+
+  Mav  —  member 972166097266700289  (@Og.mav)
+    DOB 1998-10-27  |  stated 26 on 2024-10-20 08:05 UTC  |  actually 25  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1297470622779047957
+
+  Porcelain  —  member 396396009745285123  (@chainsaw517)
+    DOB 2000-05-30  |  stated 21 on 2021-05-19 00:54 UTC  |  actually 20  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/844377370420707368
+
+  Rose  —  member 728178580621623306  (@finilix)
+    DOB 1994-07-02  |  stated 31 on 2024-10-17 11:13 UTC  |  actually 30  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1296430881447350365
+
+  Meimcrae  —  member 591843890831556624  (@Meimcrae)
+    DOB 1991-11-05  |  stated 33 on 2024-10-25 20:13 UTC  |  actually 32  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1299466001477406781
+
+  Luke  —  member 1266873918728310825  (@luc077_)
+    DOB 1997-09-15  |  stated 27 on 2024-07-28 08:03 UTC  |  actually 26  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1267029580892602378
+
+  Daff  —  member 260963200793575424  (@DaffaDillow)
+    DOB 1993-11-14  |  stated 31 on 2024-11-06 23:46 UTC  |  actually 30  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1303868023106572350
+
+  Randy  —  member 714890006346596435  (@AndrewLloydWeeber)
+    DOB 1986-07-26  |  stated 35 on 2020-11-03 16:37 UTC  |  actually 34  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/773224343978246154
+
+  Jackrippe0409  —  member 275586757200838657  (@Jackrippe0409)
+    DOB 2000-04-09  |  stated 25 on 2025-01-29 16:36 UTC  |  actually 24  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1334200573645295626
+
+  Zade  —  member 1335663326742712410  (@griffinwing28)
+    DOB 2004-04-03  |  stated 21 on 2025-02-03 12:09 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1335945152879132764
+
+  Otakunokotan  —  member 550273578629857282  (@Otakunokotan)
+    DOB 2001-04-21  |  stated 24 on 2025-02-07 23:05 UTC  |  actually 23  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1337559842805514271
+
+  Muffinode  —  member 221717718045294593  (@muffinode)
+    DOB 1994-05-24  |  stated 31 on 2025-01-20 01:50 UTC  |  actually 30  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1330716127743049779
+
+  Ariyumera  —  member 541979399516323860  (@melliyumeneko)
+    DOB 2001-03-02  |  stated 24 on 2025-02-22 01:25 UTC  |  actually 23  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1342668504247304202
+
+  Moonlit Dreams  —  member 1316795903121821707  (@moonlit_dreams_45892)
+    DOB 1992-02-06  |  stated 33 on 2025-01-19 17:50 UTC  |  actually 32  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1330595319557390378
+
+  Chocolate Jesus  —  member 160237303728570368  (@Chocolate Jesus)
+    DOB 1993-08-06  |  stated 32 on 2025-04-29 23:44 UTC  |  actually 31  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1366923074871492730
+
+  brokenanon  —  member 207926162830262274  (@brokenanon)
+    DOB 1995-11-20  |  stated 30 on 2025-06-22 16:40 UTC  |  actually 29  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1386385305082531850
+
+  NyxDarklore  —  member 327643651574595586  (@NyxDarklore)
+    DOB 1990-07-05  |  stated 35 on 2025-07-04 01:31 UTC  |  actually 34  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1390505360087056415
+
+  Batos  —  member 564017388224512012  (@batos05)
+    DOB 2006-10-10  |  stated 19 on 2025-07-09 20:37 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1392605609546874931
+
+  Daemien  —  member 1393488198465880234  (@DaemonHunter86)
+    DOB 1993-12-29  |  stated 32 on 2025-07-12 08:47 UTC  |  actually 31  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1393514073051758674
+
+  joshua_perfect  —  member 1397739577854267524  (@joshua_perfect)
+    DOB 2001-05-06  |  stated 25 on 2025-08-02 01:55 UTC  |  actually 24  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1401020639569252402
+
+  Mitch  —  member 928759864094773369  (@atlasfalter)
+    DOB 2004-08-01  |  stated 21 on 2025-07-29 14:56 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1399767549234778202
+
+  Moon  —  member 1362561629841002596  (@Moon)
+    DOB 2002-11-07  |  stated 23 on 2025-08-06 13:09 UTC  |  actually 22  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1402639822274691204
+
+  Neolakia  —  member 177591798858776576  (@neolakia)
+    DOB 2000-08-25  |  stated 25 on 2025-08-24 12:08 UTC  |  actually 24  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1409147303511457864
+
+  juicedbag  —  member 1066127686109503538  (@juicedbag1)
+    DOB 2006-10-03  |  stated 19 on 2025-09-14 17:16 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1416835066704822342
+
+  birdie  —  member 1417580154112180418  (@byebirdiebye)
+    DOB 2004-12-03  |  stated 21 on 2025-09-16 18:58 UTC  |  actually 20  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1417585337500176474
+
+  SetNox1  —  member 420172127099158528  (@setnox1)
+    DOB 2005-07-04  |  stated 20 on 2025-06-19 21:48 UTC  |  actually 19  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1385375702462890086
+
+  The Grey Potter  —  member 325729867964350464  (@The Grey Potter)
+    DOB 1989-10-17  |  stated 36 on 2025-10-05 15:01 UTC  |  actually 35  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1424411078728618054
+
+  ⧹╲⧹⧸⎠╱⧸⎠╱╲⎝⧹╲⎝⧹⧸⎠╱⧸⎠╱╲⎝⧹╲⎝⧹  —  member 746425329110876170  (@k7ll.m7yo)
+    DOB 2007-09-06  |  stated 17 on 2024-05-02 04:28 UTC  |  actually 16  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1235447727698083973
+
+  Jasper  —  member 928706276135936000  (@smiledog.exe)
+    DOB 2009-10-29  |  stated 16 on 2025-10-21 23:03 UTC  |  actually 15  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1430330634957492224
+
+  Mari  —  member 584021866306600992  (@whoscoxon)
+    DOB 2007-11-05  |  stated 16 on 2023-01-19 14:00 UTC  |  actually 15  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1065631793803440140
+
+  Kittyverse Kitty  —  member 704016880519610449  (@kittyversekitty)
+    DOB 1996-06-01  |  stated 30 on 2026-01-06 19:28 UTC  |  actually 29  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1458180558608797718
+
+  Alternative  —  member 962122754960797717  (@Asteller)
+    DOB 2007-02-24  |  stated 19 on 2026-01-08 02:26 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1458647953269985310
+
+  Katsu  —  member 455904437773533187  (@Katsunahiru)
+    DOB 2008-01-03  |  stated 19 on 2026-01-10 01:36 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1459360219577454714
+
+  Albino Waifu  —  member 1280289156807004298  (@satora_gojo__68464)
+    DOB 2002-02-01  |  stated 24 on 2026-01-11 05:37 UTC  |  actually 23  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1459783374884311092
+
+  Drakarion  —  member 472046108537782312  (@Drakarion)
+    DOB 2004-02-29  |  stated 22 on 2026-02-01 18:38 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1467589849178575163
+
+  Scruff  —  member 1104931401721196627  (@Scruffyklutz)
+    DOB 2010-04-22  |  stated 16 on 2026-02-05 10:26 UTC  |  actually 15  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1468915796469223457
+
+  Syrin  —  member 361985924571332618  (@therevenantsdream)
+    DOB 2006-07-10  |  stated 20 on 2026-02-05 17:53 UTC  |  actually 19  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1469028231847084165
+
+  suburbansniper3  —  member 1468779293965418740  (@Sebastian)
+    DOB 1998-11-09  |  stated 28 on 2026-02-12 02:47 UTC  |  actually 27  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1471336779117232179
+
+  Dat Punky Bunny  —  member 359420435294846987  (@Punk.Bunny)
+    DOB 1990-10-18  |  stated 36 on 2026-02-11 03:28 UTC  |  actually 35  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1470984918816391270
+
+  KamisFuneral  —  member 622303811226173450  (@KamisFuneral)
+    DOB 2003-08-22  |  stated 23 on 2026-02-24 14:14 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1475858465711722691
+
+  Pariah  —  member 667195173352112147  (@mellow_mirza)
+    DOB 2008-02-25  |  stated 17 on 2024-12-22 21:57 UTC  |  actually 16  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1320510571832938577
+
+  Svt  —  member 406800355242934283  (@x7uz)
+    DOB 2004-05-22  |  stated 22 on 2026-03-03 15:20 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1478411813631819877
+
+  Dru  —  member 297823842477539330  (@DruMalice85)
+    DOB 1985-06-18  |  stated 41 on 2026-03-16 15:24 UTC  |  actually 40  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1483123740169470073
+
+  Robert  —  member 1483926607684174095  (@wilrobert_)
+    DOB 1979-10-26  |  stated 47 on 2026-03-18 20:59 UTC  |  actually 46  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1483933007999140024
+
+  frances  —  member 1485853863570440376  (@frannyfannyfan)
+    DOB 2007-07-01  |  stated 19 on 2026-03-24 21:19 UTC  |  actually 18  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1486112170553901180
+
+  juiceyreads  —  member 1407694889549824093  (@juiceyreads)
+    DOB 1999-12-09  |  stated 27 on 2026-04-02 21:31 UTC  |  actually 26  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1489376754912071742
+
+  Azure  —  member 1488885723649277963  (@Azure_origin)
+    DOB 1993-06-27  |  stated 33 on 2026-04-06 13:39 UTC  |  actually 32  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1490707456458756236
+
+  Mimi  —  member 894394170863661086  (@Violetsskeleton)
+    DOB 2009-11-14  |  stated 17 on 2026-04-14 05:33 UTC  |  actually 16  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1493484335737868338
+
+  Trill  —  member 306319573588770816  (@trill6915)
+    DOB 1993-12-23  |  stated 33 on 2026-04-24 01:27 UTC  |  actually 32  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1497046211189018655
+
+  pureread  —  member 1496218394649690254  (@Pure read)
+    DOB 2004-08-03  |  stated 22 on 2026-04-27 17:38 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1498377818826870845
+
+  Hybrid  —  member 1502023040945488103  (@hybrid._.freak)
+    DOB 2003-08-15  |  stated 23 on 2026-05-09 20:33 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1502770493097246920
+
+  Griffo  —  member 701694597146869801  (@g.r.i.f.f.o)
+    DOB 1994-07-14  |  stated 32 on 2026-05-12 10:43 UTC  |  actually 31  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1503709090688401419
+
+  kilolo  —  member 573841083310800906  (@mars_topluto)
+    DOB 2004-06-16  |  stated 22 on 2026-05-15 01:25 UTC  |  actually 21  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1504655868191314051
+
+  Fan  —  member 332417365067169802  (@fanfictioned)
+    DOB 1999-07-01  |  stated 27 on 2026-06-23 00:38 UTC  |  actually 26  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1518777223190937741
+
+  Vexlo  —  member 1228529407300468826  (@vexlo05)
+    DOB 2005-07-12  |  stated 21 on 2026-06-26 23:41 UTC  |  actually 20  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1520212333660475455
+
+  Wrench Jockey  —  member 319617340973121538  (@the_wraith_nos4a2)
+    DOB 1996-07-11  |  stated 30 on 2026-07-01 08:51 UTC  |  actually 29  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1521800450557476894
+
+  Dreamer  —  member 1534385244277571664  (@dreamer_9332)
+    DOB 1993-09-06  |  stated 33 on 2026-08-05 03:57 UTC  |  actually 32  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1534410049684901930
+
+  Hexx  —  member 1096221919201722398  (@Hexx)
+    DOB 2002-08-19  |  stated 24 on 2026-08-08 20:04 UTC  |  actually 23  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1535740437917081740
+
+  Shmokey  —  member 1533131182026395660  (@Shomkey1992)
+    DOB 1992-09-08  |  stated 34 on 2026-08-14 23:21 UTC  |  actually 33  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1537964390064590999
+
+  vycanisMajoris3  —  member 810120813428605018  (@vycanismajoris3)
+    DOB 2008-07-31  |  stated 16 on 2023-11-03 23:41 UTC  |  actually 15  |  claimed OLDER by 1 yr  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1170145725292744774
+
+  Kunai  —  member 1173346439406030939  (@Kunai)
+    DOB 2001-09-19  |  stated 25 on 2026-09-06 23:12 UTC  |  actually 24  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1546297026550046720
+
+  holysinner  —  member 1530812942293930147  (@holysinner)
+    DOB 1999-09-28  |  stated 27 on 2026-09-08 23:49 UTC  |  actually 26  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1547031162977787955
+
+  Vincent  —  member 1265641275365789769  (@Lancelot)
+    DOB 2004-06-16  |  stated 22 on 2026-02-07 19:17 UTC  |  actually 21  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1469774181368598829
+
+  Ren  —  member 1229974233950720012  (@regolithdabomb)
+    DOB 1997-10-01  |  stated 29 on 2026-09-13 20:42 UTC  |  actually 28  |  claimed OLDER by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1548796037605363785
+
+  Richard  —  member 1312038236721381430  (@Richard)
+    DOB 2003-09-23  |  stated 23 on 2026-09-15 02:19 UTC  |  actually 22  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1549243345107288075
+
+  Pip  —  member 1301157930233626715  (@lloethan)
+    DOB 1977-11-23  |  stated 49 on 2026-09-16 12:32 UTC  |  actually 48  |  claimed OLDER by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1549759901256126465
+
+  kiwi  —  member 634772683719966765  (@iheartkiwis)
+    DOB 2008-09-07  |  stated 17 on 2025-03-31 18:46 UTC  |  actually 16  |  claimed OLDER by 1 yr  |  typed 4 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1356338801622126828
+
+  Revenant  —  member 450213809622351872  (@Revenant#5533)
+    DOB 1991-05-12  |  stated 28 on 2021-03-12 13:02 UTC  |  actually 29  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/819918235188854814
+
+  Crimson  —  member 728396086938566668  (@Crimson#0621)
+    DOB 2000-04-03  |  stated 19 on 2020-08-27 10:01 UTC  |  actually 20  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/748482339109208075
+
+  Goldfish  —  member 431939114472833026  (@GoldFishKisses)
+    DOB 1989-07-23  |  stated 30 on 2021-04-25 03:59 UTC  |  actually 31  |  claimed younger by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/835726702708785154
+
+  Ventrispasani  —  member 274242787556196352  (@ventrispasani)
+    DOB 1992-10-28  |  stated 27 on 2021-10-10 04:56 UTC  |  actually 28  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/896622319303270440
+
+  Em  —  member 423966710010478603  (@rememberedorison)
+    DOB 1989-03-22  |  stated 31 on 2021-05-11 00:05 UTC  |  actually 32  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/841466120276148254
+
+  Z  —  member 353512979700121610  (@z_______)
+    DOB 1994-04-16  |  stated 27 on 2022-09-29 23:38 UTC  |  actually 28  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1025189744348516393
+
+  BryceAsh  —  member 1025980789889966091  (@BryceAsh#9331)
+    DOB 1993-06-06  |  stated 28 on 2022-10-02 04:09 UTC  |  actually 29  |  claimed younger by 1 yr  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1025982937184866325
+
+  Alec  —  member 335229961386590211  (@alecgalaxy)
+    DOB 2004-03-15  |  stated 17 on 2022-11-05 21:06 UTC  |  actually 18  |  claimed younger by 1 yr  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1038560082121723954
+
+  Nitwhit  —  member 729098777503465538  (@nitwhit#8522)
+    DOB 1988-05-25  |  stated 33 on 2022-12-20 19:19 UTC  |  actually 34  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1054840604988821555
+
+  Polysocial#0001  —  member 422554691168370688  (@Polysocial)
+    DOB 1996-07-26  |  stated 25 on 2023-01-18 01:25 UTC  |  actually 26  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1065079463060177006
+
+  Duke  —  member 854773487448358953  (@Duke.Nelson)
+    DOB 1993-01-31  |  stated 29 on 2023-05-06 08:50 UTC  |  actually 30  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1104329353740947476
+
+  Mariahna  —  member 539825733791645707  (@mariahnarime)
+    DOB 1991-02-17  |  stated 31 on 2023-07-15 02:40 UTC  |  actually 32  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1129603491124482169
+
+  Red  —  member 817755078285852683  (@redmyeyes)
+    DOB 1981-04-24  |  stated 40 on 2023-03-23 00:20 UTC  |  actually 41  |  claimed younger by 1 yr  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1088255840638734386
+
+  Onlydreamsnow  —  member 996169229508284496  (@onlydreamsnow)
+    DOB 1991-01-17  |  stated 31 on 2023-08-20 03:08 UTC  |  actually 32  |  claimed younger by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1142656450557136968
+
+  ClearSailing  —  member 1007450158990110840  (@ClearSailing#3951)
+    DOB 1996-05-05  |  stated 25 on 2022-08-12 13:27 UTC  |  actually 26  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1007641403314151445
+
+  Cloverstarling  —  member 341047978443669514  (@Cloverstarling)
+    DOB 1992-04-25  |  stated 30 on 2023-11-13 02:22 UTC  |  actually 31  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1173447726445375659
+
+  Rebecca  —  member 855259566844149811  (@Bibiwastaken)
+    DOB 1992-01-16  |  stated 30 on 2023-11-28 20:57 UTC  |  actually 31  |  claimed younger by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1179164149834600448
+
+  Ari  —  member 254808030871420928  (@lady_chimera)
+    DOB 1999-09-16  |  stated 23 on 2024-01-19 01:48 UTC  |  actually 24  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1197719157752467587
+
+  Sadi  —  member 269327444656259072  (@sadi6666)
+    DOB 1982-01-29  |  stated 40 on 2023-12-07 03:14 UTC  |  actually 41  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1182158055140499497
+
+  Canine Poetry  —  member 1142583608574484500  (@https.lover.com)
+    DOB 2006-02-03  |  stated 17 on 2024-02-05 21:36 UTC  |  actually 18  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1204178877887287296
+
+  _itzcat_  —  member 1235930975318442095  (@_itzcat_)
+    DOB 2006-03-08  |  stated 17 on 2024-05-17 01:47 UTC  |  actually 18  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1240843129658150913
+
+  Milliegoat  —  member 458884479101042688  (@Millierem3521)
+    DOB 1991-04-02  |  stated 32 on 2024-07-12 03:55 UTC  |  actually 33  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1261169138546511972
+
+  szirene  —  member 493477897068347394  (@szirene)
+    DOB 2000-06-02  |  stated 22 on 2023-06-02 16:00 UTC  |  actually 23  |  claimed younger by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1114222059980083221
+
+  mirthfulfox  —  member 403419148912164864  (@mirthfulfox6174)
+    DOB 1987-05-07  |  stated 36 on 2024-08-24 18:09 UTC  |  actually 37  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1276966688126013514
+
+  Sentry  —  member 779806789200904193  (@Sentry)
+    DOB 2002-07-11  |  stated 21 on 2024-09-03 10:30 UTC  |  actually 22  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1280475022779220090
+
+  Veronica  —  member 431938569821487114  (@veronica_re)
+    DOB 1999-06-20  |  stated 24 on 2024-09-10 17:50 UTC  |  actually 25  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1283122376623652915
+
+  Joober  —  member 423057072201138176  (@jimmerframe)
+    DOB 2002-03-25  |  stated 21 on 2024-12-02 05:56 UTC  |  actually 22  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1313020934596202577
+
+  Sparkles  —  member 326276885912879105  (@rpsparkles)
+    DOB 1989-05-01  |  stated 34 on 2024-12-17 01:59 UTC  |  actually 35  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1318397224983724092
+
+  Pigg  —  member 579406173254582304  (@sherpapigg)
+    DOB 2003-09-15  |  stated 20 on 2025-01-05 10:13 UTC  |  actually 21  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1325406792175456328
+
+  Saif  —  member 884018120904282122  (@saif5643)
+    DOB 1989-12-14  |  stated 32 on 2023-01-12 13:59 UTC  |  actually 33  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1063094857607954502
+
+  Farewell Chiaotzu  —  member 1048420199637995540  (@Maedoinheaven)
+    DOB 1999-07-09  |  stated 22 on 2022-12-13 20:38 UTC  |  actually 23  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1052323548452114493
+
+  Morg  —  member 176658049316945920  (@mooncakeowo)
+    DOB 1995-01-09  |  stated 27 on 2023-03-07 03:46 UTC  |  actually 28  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1082509564169171016
+
+  I don’t have one, Bute Kate8  —  member 1322934858913157213  (@K8llington)
+    DOB 2000-03-07  |  stated 24 on 2025-04-24 09:24 UTC  |  actually 25  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1364894755640836188
+
+  H3adcra6z0m613  —  member 367069198091943938  (@H3adcra6z0m613)
+    DOB 1987-02-27  |  stated 37 on 2025-04-27 02:45 UTC  |  actually 38  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1365881549702172723
+
+  Four  —  member 201580841195929600  (@Fourst)
+    DOB 1993-02-28  |  stated 28 on 2022-06-07 21:35 UTC  |  actually 29  |  claimed younger by 1 yr  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/983846739595370547
+
+  Rogue  —  member 747792919951441920  (@RogueIsRed)
+    DOB 1996-01-15  |  stated 28 on 2025-08-09 20:07 UTC  |  actually 29  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1403832070744047636
+
+  FileNotFound  —  member 415758033331945492  (@FileNotFound)
+    DOB 2001-07-24  |  stated 23 on 2025-08-17 03:53 UTC  |  actually 24  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1406486122040660069
+
+  war_horsemen_jr  —  member 438400881319215112  (@war jr)
+    DOB 1998-05-28  |  stated 26 on 2025-09-10 02:59 UTC  |  actually 27  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1415169691143372882
+
+  《Arzzy》  —  member 884766631069380628  (@Missapy)
+    DOB 2005-07-12  |  stated 19 on 2025-10-14 18:12 UTC  |  actually 20  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1427720862664233080
+
+  AkiBabyMama  —  member 260126079077974016  (@thiccbol0gna)
+    DOB 2003-10-05  |  stated 21 on 2025-10-24 00:07 UTC  |  actually 22  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1431071562294890607
+
+  Kurai_Ran  —  member 350346429836820481  (@Kurai_Ran)
+    DOB 1994-08-06  |  stated 30 on 2025-11-13 21:35 UTC  |  actually 31  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1438643444430929930
+
+  Ellie  —  member 340282709400092672  (@elliebun)
+    DOB 1999-01-26  |  stated 25 on 2025-11-29 06:43 UTC  |  actually 26  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1444217208237461545
+
+  Trench  —  member 360230567276707841  (@trench2339)
+    DOB 1979-03-22  |  stated 45 on 2025-12-15 06:37 UTC  |  actually 46  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1450013921963675749
+
+  FactoryKat  —  member 123156382768824320  (@factorykat)
+    DOB 1985-09-18  |  stated 36 on 2023-04-08 21:04 UTC  |  actually 37  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1094367260967186563
+
+  Hysteria82  —  member 623950520020631570  (@hysteria82.)
+    DOB 1982-01-15  |  stated 43 on 2026-01-29 01:24 UTC  |  actually 44  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1466242644324651162
+
+  Virgo  —  member 171837347925721088  (@Virgo)
+    DOB 1989-08-26  |  stated 35 on 2026-02-06 15:26 UTC  |  actually 36  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1469353625687163077
+
+  Corporate Social  —  member 408609951750160384  (@paritoshdubey)
+    DOB 1992-06-23  |  stated 32 on 2026-03-23 02:43 UTC  |  actually 33  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1485469021737324604
+
+  ModifiedSaitama  —  member 1251298512931655753  (@jaizen_anubis)
+    DOB 1999-09-21  |  stated 25 on 2026-04-02 18:54 UTC  |  actually 26  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1489337203891900506
+
+  Sir Q  —  member 162618370628386816  (@sir_q_0882)
+    DOB 2004-05-19  |  stated 20 on 2026-04-12 02:08 UTC  |  actually 21  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1492708066746171404
+
+  Sage ヾ(๑╹◡╹)ﾉ"  —  member 923023567455653900  (@socksnsandels)
+    DOB 2001-08-22  |  stated 23 on 2026-04-17 06:58 UTC  |  actually 24  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1494592973172772994
+
+  𝄒᳝✺̸̶ֹ۪ 𝗸ɩ໋݂𝖑𝖑 𝖘𝘄ֹ᷼ɩƭɕ݂hֹ  —  member 599382547813761054  (@Hollow_666.)
+    DOB 2003-02-07  |  stated 22 on 2026-05-14 01:11 UTC  |  actually 23  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1504290052556197888
+
+  Bee  —  member 1147234372932612117  (@B331707.)
+    DOB 2007-07-17  |  stated 17 on 2026-05-18 14:01 UTC  |  actually 18  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1505933329268998316
+
+  BunNyx  —  member 1508985079509291018  (@BunNyx)
+    DOB 1998-05-27  |  stated 27 on 2026-05-27 07:26 UTC  |  actually 28  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1509095448101519441
+
+  Mads  —  member 233067786799284224  (@antlercalves)
+    DOB 1991-03-01  |  stated 34 on 2026-06-09 22:44 UTC  |  actually 35  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1514037485263650997
+
+  November  —  member 638094385896226817  (@.novemberrainbow)
+    DOB 1992-03-10  |  stated 33 on 2026-06-11 13:13 UTC  |  actually 34  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1514618653453193236
+
+  Animi Textor  —  member 599782718913380398  (@Lacedinyourblood)
+    DOB 2004-06-21  |  stated 21 on 2026-07-09 23:38 UTC  |  actually 22  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1524922619005112621
+
+  Divot  —  member 1526805726666821720  (@divotry)
+    DOB 1996-06-06  |  stated 29 on 2026-07-15 04:58 UTC  |  actually 30  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1526815165574545408
+
+  RaspyBeard  —  member 274773440836272128  (@RaspyBeard)
+    DOB 1993-04-05  |  stated 32 on 2026-07-15 23:37 UTC  |  actually 33  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1527096709514133595
+
+  Criss  —  member 366293995158241280  (@Unheavenlycreatures)
+    DOB 1979-11-06  |  stated 40 on 2021-02-19 19:46 UTC  |  actually 41  |  claimed younger by 1 yr  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/812409908770504795
+
+  videodrome  —  member 665165297870962689  (@youcancallmeal4224)
+    DOB 2004-01-29  |  stated 21 on 2026-07-30 00:45 UTC  |  actually 22  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1532187468953161809
+
+  TheDevilWithin  —  member 918667942873399417  (@TheDevilWithin)
+    DOB 1990-06-03  |  stated 35 on 2026-08-20 03:42 UTC  |  actually 36  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1539842158578638949
+
+  Skuggflamma  —  member 339323518044995594  (@Skuggflamma)
+    DOB 1987-09-14  |  stated 37 on 2026-08-23 17:03 UTC  |  actually 38  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1541130718237827074
+
+  Lilith  —  member 1542184386760417304  (@thesilentquill)
+    DOB 1999-02-14  |  stated 26 on 2026-08-26 15:24 UTC  |  actually 27  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1542193030432563312
+
+  Rotmorn  —  member 668694844423798784  (@WoollyMouse)
+    DOB 2000-09-02  |  stated 25 on 2026-09-10 04:19 UTC  |  actually 26  |  claimed younger by 1 yr
+    https://discord.com/channels/300829309214523392/735579435000004747/1547461498748534865
+
+  Sandeep Goyal  —  member 590874000092299294  (@sandeepgoyal)
+    DOB 1983-02-03  |  stated 36 on 2022-01-13 10:43 UTC  |  actually 38  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/931136365545001020
+
+  Steph  —  member 595774084747624478  (@3picfale)
+    DOB 1998-03-23  |  stated 22 on 2022-09-01 20:47 UTC  |  actually 24  |  claimed younger by 2 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1014999936959520789
+
+  OS  —  member 415204756567359489  (@operatingsystem.)
+    DOB 2000-02-05  |  stated 21 on 2023-02-08 04:09 UTC  |  actually 23  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1072730790145839154
+
+  A_common_idiot  —  member 611729717892087808  (@A_common_idiot)
+    DOB 2002-01-18  |  stated 20 on 2024-05-30 19:58 UTC  |  actually 22  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1245828764336914432
+
+  Nyx  —  member 1421771345087434772  (@Nyx_Oni)
+    DOB 1998-01-30  |  stated 25 on 2025-09-28 20:41 UTC  |  actually 27  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1421960096988139570
+
+  Display pic of me with my book/sana  —  member 471643077698781186  (@deansxgirl)
+    DOB 1991-07-02  |  stated 32 on 2025-08-01 07:41 UTC  |  actually 34  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1400745144986112091
+
+  Mako  —  member 117485593151143937  (@dampachi)
+    DOB 1988-12-13  |  stated 35 on 2026-01-14 01:52 UTC  |  actually 37  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1460813894556844123
+
+  birdie  —  member 1233482198179381313  (@bluebirdie.1)
+    DOB 1997-10-13  |  stated 26 on 2026-04-17 22:07 UTC  |  actually 28  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1494821655292280893
+
+  Kellu  —  member 1532352060438216917  (@Kell)
+    DOB 2003-03-07  |  stated 21 on 2026-08-03 21:59 UTC  |  actually 23  |  claimed younger by 2 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1533957408659865702
+
+  Fictional_1  —  member 908122987788632074  (@Fictional_1)
+    DOB 1982-09-08  |  stated 37 on 2022-09-16 21:32 UTC  |  actually 40  |  claimed younger by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1020447197407498250
+
+  Fang  —  member 953093887507976262  (@fangfer)
+    DOB 1995-12-08  |  stated 25 on 2024-07-26 16:39 UTC  |  actually 28  |  claimed younger by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1266434804854030346
+
+  Sage  —  member 334572070396493825  (@Sagehusband)
+    DOB 1999-07-19  |  stated 22 on 2024-12-06 14:51 UTC  |  actually 25  |  claimed younger by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1314605223473447013
+
+  🦭  —  member 1195134832934658078  (@sealpupz)
+    DOB 2006-04-03  |  stated 16 on 2025-06-22 03:40 UTC  |  actually 19  |  claimed younger by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1386189026972795053
+
+  sleepinghesper  —  member 341384604986507276  (@sleepinghesper)
+    DOB 1992-02-21  |  stated 30 on 2025-08-26 03:05 UTC  |  actually 33  |  claimed younger by 3 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1409735500583014524
+
+  Midnight system  —  member 1084843114964975666  (@midnigh_alora)
+    DOB 2006-10-30  |  stated 16 on 2026-04-25 17:39 UTC  |  actually 19  |  claimed younger by 3 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1497653399078830122
+
+  Natters  —  member 455801809785716736  (@_natters_)
+    DOB 1984-01-29  |  stated 35 on 2023-06-14 00:27 UTC  |  actually 39  |  claimed younger by 4 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1118335826607218770
+
+  FM  —  member 625878877801283587  (@xms_798)
+    DOB 1993-03-16  |  stated 25 on 2022-12-26 02:31 UTC  |  actually 29  |  claimed younger by 4 yrs  |  typed 3 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1056761267123142686
+
+  Dull  —  member 603137174090547210  (@snorlaxenergy)
+    DOB 1992-04-28  |  stated 25 on 2021-09-01 16:51 UTC  |  actually 29  |  claimed younger by 4 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/882668913178071081
+
+  Deetje  —  member 576816585365389346  (@deetje1212)
+    DOB 2001-12-12  |  stated 20 on 2026-09-09 10:30 UTC  |  actually 24  |  claimed younger by 4 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1547192408721203230
+
+  Amicus  —  member 185539684812718080  (@Kellenar#2218)
+    DOB 1989-05-17  |  stated 28 on 2023-04-15 02:44 UTC  |  actually 33  |  claimed younger by 5 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1096626993593847888
+
+  OverTheTop  —  member 1174879313422725223  (@overthetop03)
+    DOB 1987-09-03  |  stated 31 on 2023-11-25 19:22 UTC  |  actually 36  |  claimed younger by 5 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1178053179888373841
+
+  Havik  —  member 225776941213548546  (@TheHavik)
+    DOB 1991-12-11  |  stated 25 on 2022-01-25 21:56 UTC  |  actually 30  |  claimed younger by 5 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/935654468459048981
+
+  avenuesofsin  —  member 1001242175943757834  (@avenuesofsin)
+    DOB 1986-04-07  |  stated 32 on 2024-02-04 01:17 UTC  |  actually 37  |  claimed younger by 5 yrs  |  typed 2 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/1203509504352976936
+
+  goonmommy  —  member 1133983819242934422  (@mistresseva.)
+    DOB 1995-07-12  |  stated 25 on 2025-10-23 23:55 UTC  |  actually 30  |  claimed younger by 5 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1431068582657134702
+
+  tezberry  —  member 100294517680275456  (@tezberry)
+    DOB 1990-01-01  |  stated 30 on 2026-07-17 19:57 UTC  |  actually 36  |  claimed younger by 6 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1527766096902488236
+
+  Mandy  —  member 123225030061457409  (@vhaziri)
+    DOB 1987-08-30  |  stated 25 on 2020-07-24 21:07 UTC  |  actually 32  |  claimed younger by 7 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/736328683500994620
+
+  Roleplayonly12  —  member 393288957779247104  (@roleplayonlyiscool)
+    DOB 1987-04-28  |  stated 26 on 2021-04-15 14:43 UTC  |  actually 33  |  claimed younger by 7 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/832264901559844864
+
+  Ash  —  member 1037401706331373679  (@Asheshp)
+    DOB 1992-05-02  |  stated 26 on 2025-07-14 20:43 UTC  |  actually 33  |  claimed younger by 7 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1394419167716835388
+
+  Tokiano  —  member 1229725042762448946  (@tokiano_880)
+    DOB 2000-06-16  |  stated 16 on 2026-05-14 10:19 UTC  |  actually 25  |  claimed younger by 9 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1504428006763139213
+
+  Chelsea  —  member 407102621896278028  (@Chels4766)
+    DOB 1988-11-06  |  stated 23 on 2022-06-25 02:49 UTC  |  actually 33  |  claimed younger by 10 yrs  |  typed 8 numbers
+    https://discord.com/channels/300829309214523392/735579435000004747/990086375590228019
+
+  Esper Actual  —  member 894170229129760828  (@Esper_Actual)
+    DOB 1983-05-28  |  stated 30 on 2023-08-21 08:20 UTC  |  actually 40  |  claimed younger by 10 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/1143097278219943968
+
+  Stealthy Ninja  —  member 363409310526734348  (@blonde_dynamite)
+    DOB 1981-01-01  |  stated 29 on 2022-06-21 13:18 UTC  |  actually 41  |  claimed younger by 12 yrs
+    https://discord.com/channels/300829309214523392/735579435000004747/988794978916507749

@@ -1,6 +1,8 @@
 // Schema + in-place migrations. Each block creates the current schema on a fresh
 // DB and migrates an existing one. Runs once at boot via init().
 const { pool } = require('./pool');
+const { initAdvertLabels } = require('./advertLabelsSchema');
+const { initMemberAges } = require('./memberAgesSchema');
 
 async function init() {
   // Single-server bot, so tables carry no guild_id. Only GROUP advert images are
@@ -49,6 +51,22 @@ async function init() {
   // cleanup's age query.
   await pool.query(
     'CREATE INDEX IF NOT EXISTS messages_created_idx ON messages (created_at);'
+  );
+
+  // One row per advert post that has carried :staffapproved:, keyed by message so
+  // repeats of the same (author, text) stay independent. content_hash is the
+  // canonical text hash (see advertHash.js). Rows persist past message deletion;
+  // only pulling the reaction removes one. Lookup index serves the author+hash probe.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS advert_approval_hashes (
+      message_id   TEXT PRIMARY KEY,
+      author_id    TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      channel_id   TEXT
+    );
+  `);
+  await pool.query(
+    'CREATE INDEX IF NOT EXISTS advert_approval_hashes_lookup_idx ON advert_approval_hashes (author_id, content_hash);'
   );
 
   // Link-check grace clock: the daily sweep stamps a violating post here (keyed
@@ -113,6 +131,8 @@ async function init() {
   await pool.query(
     'ALTER TABLE member_state ADD COLUMN IF NOT EXISTS display_name TEXT;'
   );
+
+  await initMemberAges((sql) => pool.query(sql));
 
   // Append-only history: one row per nickname change (new value; NULL = reset
   // to plain username) and one row per role add/remove.
@@ -245,6 +265,76 @@ async function init() {
   await pool.query(
     'CREATE INDEX IF NOT EXISTS infraction_posts_posted_idx ON infraction_posts (posted_at);'
   );
+
+  // Profile pictures of known marketer accounts. A joining member whose avatar's
+  // perceptual hash is within PFP_MATCH_MAX_DISTANCE bits of a row is kicked
+  // (pfpGuard.js). `thumb` is a 128px png preview for the kick log.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketer_pfps (
+      id             BIGSERIAL PRIMARY KEY,
+      phash          TEXT NOT NULL,
+      thumb          BYTEA NOT NULL,
+      source_user_id TEXT,
+      note           TEXT,
+      added_by       TEXT NOT NULL,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      hits           INTEGER NOT NULL DEFAULT 0,
+      last_hit_at    TIMESTAMPTZ
+    );
+  `);
+
+  // --- Website (rpc-web) tables. The site never creates tables, so they live here.
+
+  // Bingo cards uploaded by managers.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bingo_cards (
+      id           BIGSERIAL PRIMARY KEY,
+      name         TEXT NOT NULL,
+      image        BYTEA NOT NULL,
+      content_type TEXT NOT NULL,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by   TEXT
+    );
+  `);
+  // Each member's marked cells, one row per (member, card).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bingo_marks (
+      user_id    TEXT NOT NULL,
+      card_id    BIGINT NOT NULL REFERENCES bingo_cards(id) ON DELETE CASCADE,
+      cells      INTEGER[] NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, card_id)
+    );
+  `);
+  // One row per member per card they've posted to Discord: each card posts once.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bingo_submissions (
+      user_id      TEXT NOT NULL,
+      card_id      BIGINT NOT NULL REFERENCES bingo_cards(id) ON DELETE CASCADE,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, card_id)
+    );
+  `);
+  // Each member's posted trading card (bytes: Discord CDN urls expire). `approved`
+  // mirrors its :staffapproved: reaction, kept current by src/tcgApproval.js
+  // (checked_at = last check).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tcg_cards (
+      user_id      TEXT PRIMARY KEY,
+      message_id   TEXT NOT NULL,
+      channel_id   TEXT NOT NULL,
+      image        BYTEA NOT NULL,
+      content_type TEXT NOT NULL,
+      approved     BOOLEAN NOT NULL DEFAULT false,
+      checked_at   TIMESTAMPTZ,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // AI advert keywords (advertLabeller.js, read by rpc-web): batches, labels, the
+  // labeller token's hash, and the submit_advert_labels() RPC the Claude Code
+  // routine calls. SQL in advertLabelsSchema.js.
+  await initAdvertLabels((sql) => pool.query(sql));
 }
 
 module.exports = { init };
