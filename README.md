@@ -184,6 +184,20 @@ This is not a background service: the bot only runs while the window is open. To
 have it run unattended / survive reboots, use the free host in
 [step 6](#6-deploy-to-the-free-host) instead.
 
+## Missing database methods after an upload
+
+If startup reports errors such as `db.setLabellerTokenHash is not a function`,
+`store.setMemberAge is not a function` or `db.deleteApprovedHash is not a function`,
+check `src/db.js` in the deployed files. Older releases put the entire data layer
+in that file; newer releases put it in `src/db/`. Node loads `src/db.js` first,
+so an old file left on the host shadows the new folder even when every file in
+that folder was uploaded successfully.
+
+Upload the current `src/db.js`, overwriting the old one. It forwards to
+`require('./db/index.js')`, so all features use the same current store and pool.
+Also upload the full `src/db/` directory, then restart the bot. No database reset
+or dependency reinstall is required.
+
 ## Member ages
 
 Current members already have a `member_state` row for their roles, nickname and
@@ -198,6 +212,8 @@ new declarations even when the channel is ignored by the archive or YAGPDB is
 online. Raw age-channel messages are excluded from the archive. A leave, kick
 or ban deletes the member's current baseline, including the age; full member
 reconciliation at startup also cleans up departures missed while offline.
+In-flight age scans and member updates are invalidated on departure, including
+a rapid rejoin. Roster pruning preserves joins made while the roster was fetched.
 Existing moderation history follows its existing retention rules.
 
 Run `npm run backfill:ages` to backfill immediately with the bot's `.env`; it
@@ -455,7 +471,10 @@ How it works (`src/advertLabeller.js`):
 - **Same-fandom report** (`src/fandomReport.js`): once the day's run is over,
   the bot posts to `FANDOM_REPORT_CHANNEL_ID` (**#bot_spam**) one line per pair
   of standing one-on-one adverts by the same poster that share a fandom:
-  `@poster <newer ad link> <older ad link>`. Only pairs with an advert labelled
+  `@poster <newer ad link> <older ad link>`. The report opens with: "A new or updated
+  advert shares fandoms with another active advert by the same poster."
+  It posts at most once per Eastern calendar day, and only if there are matching
+  pairs. Only pairs with an advert labelled
   since the last report are listed, so each shows up once. The first post pings
   the user ids in `ADREVIEWERS`; the posters' mentions don't ping;
   past 2000 characters it continues in another post. `node src/fandomReport.js
@@ -467,10 +486,16 @@ per prompt version), `advert_labeller_secret` (sha256 of `LABELLER_TOKEN`),
 boot like everything else; the migration only ever adds.
 
 The routine can also return `author_age` for each advert: an exact, self-stated
-writer age (integer 1-120), or `null` when unknown. It is stored on
+writer age, or a supported representative value when an approximate self-age
+falls in one filter bucket (under 18, 18-20, 21-24, or 25+). It is an integer
+1-120, or `null` when unknown. It is stored on
 `advert_labels.author_age`, associated with that message and prompt version,
 and copied with the labels when identical text is reposted. It describes the
-age stated in that post, not a verified or automatically advancing member age.
+age or age bucket stated in that post, not a verified or automatically advancing
+member age. Representative values must not be interpreted as exact ages.
+Examples: "in my 30s" gives 30, "mid-twenties" gives 25 (a prompt convention),
+and "almost 20" gives 19. Descriptions spanning buckets, such as "18+", "21+"
+or "in my twenties", remain unknown unless more author-age detail narrows them.
 Experience durations, partner age preferences, age gates and character ages
 are excluded by the routine's instructions.
 

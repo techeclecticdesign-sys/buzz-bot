@@ -78,10 +78,12 @@ async function setMemberAges(records) {
 
 // Drop baselines for everyone not in `presentIds` (the full member list). Catches
 // departures that happened while the bot was offline. Returns rows removed.
-async function pruneDepartedMemberState(presentIds) {
+// A cutoff protects joins that occurred while the roster fetch was in flight.
+async function pruneDepartedMemberState(presentIds, before = null) {
   const res = await query(
-    'DELETE FROM member_state WHERE NOT (user_id = ANY($1::text[]))',
-    [presentIds]
+    `DELETE FROM member_state WHERE NOT (user_id = ANY($1::text[]))
+      AND ($2::timestamptz IS NULL OR updated_at < $2 OR updated_at IS NULL)`,
+    [presentIds, before]
   );
   return res.rowCount;
 }

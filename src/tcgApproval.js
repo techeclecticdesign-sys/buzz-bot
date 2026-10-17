@@ -73,6 +73,12 @@ function create({ client, emojiId, store = db }) {
   async function onDeleted(gone) {
     if (!emojiId) return;
     try {
+      // A fetch made before deletion may still return the old approved post.
+      // Let pending writes finish before clearing it. A thread delete can affect
+      // any starter post, so wait for all card checks in that case.
+      const pending = gone.channelId ? [...queues.values()]
+        : (gone.messageIds ?? []).map((id) => queues.get(id)).filter(Boolean);
+      await Promise.all(pending);
       await store.unapproveDeletedTcgCards(gone);
     } catch (err) {
       console.error('[tcg-approval] delete sync failed:', err.message);

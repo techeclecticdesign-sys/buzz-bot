@@ -142,6 +142,25 @@ test('checks on one message land in event order, even when the first fetch is sl
   assert.deepEqual(store.writes, [[CARD, true], [CARD, false]]);
 });
 
+for (const gone of [{ messageIds: [CARD] }, { channelId: 'thread-1' }]) {
+  test(`deletion wins over a card check already fetching: ${JSON.stringify(gone)}`, async () => {
+    const store = fakeStore();
+    let approved = false;
+    store.setTcgCardApproval = async (_id, value) => { approved = value; };
+    store.unapproveDeletedTcgCards = async () => { approved = false; };
+    const sync = create({ emojiId: EMOJI, store });
+    let release;
+    const checking = sync.onReaction({ emoji: { id: EMOJI }, message: {
+      id: CARD, channelId: 'thread-1', fetch: () => new Promise((r) => { release = r; }),
+    } });
+    await new Promise((r) => setImmediate(r));
+    const deleting = sync.onDeleted(gone);
+    release(messageWith([EMOJI]));
+    await Promise.all([checking, deleting]);
+    assert.equal(approved, false);
+  });
+}
+
 test('startup reconcile checks every card; gone ones unapproved, failures skipped', async () => {
   const rows = [
     { message_id: 'a', channel_id: 'thread-a' },

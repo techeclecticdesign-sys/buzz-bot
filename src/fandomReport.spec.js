@@ -57,11 +57,15 @@ test('reportPosts pings the reviewers once, at the top of the first post; poster
   const posts = reportPosts(pairs, GUILD, reviewers);
   assert.ok(posts.length > 1);
   assert.equal(posts[0].content.split('\n')[0], '<@962175556055617546> <@671760757679194231>');
+  assert.equal(posts[0].content.split('\n')[1],
+    'A new or updated advert shares fandoms with another active advert by the same poster.');
   assert.deepEqual(posts[0].allowedMentions, { parse: [], users: reviewers });
   for (const p of posts.slice(1)) assert.deepEqual(p.allowedMentions, { parse: [], users: [] });
-  // No reviewers set: just the pair lines, nobody pinged.
+  // No reviewers set: the explanation and pair lines, nobody pinged.
   const quiet = reportPosts(pairs.slice(0, 1), GUILD, []);
-  assert.ok(quiet[0].content.startsWith(`<@${pairs[0].author_id}> https://`));
+  assert.equal(quiet[0].content.split('\n')[0],
+    'A new or updated advert shares fandoms with another active advert by the same poster.');
+  assert.ok(quiet[0].content.split('\n')[1].startsWith(`<@${pairs[0].author_id}> https://`));
   assert.deepEqual(quiet[0].allowedMentions.users, []);
 });
 

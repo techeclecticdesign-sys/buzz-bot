@@ -36,10 +36,11 @@ function reportLines(pairs, guildId) {
   );
 }
 
-// The report's posts: a line pinging the reviewers (if any), then the pair lines.
+// The report's posts: reviewers (if any), an explanation, then the pair lines.
 // Returns [{ content, allowedMentions }]; only the first post pings anyone.
 function reportPosts(pairs, guildId, reviewers = REVIEWERS) {
   const head = reviewers.length ? [reviewers.map((id) => `<@${id}>`).join(' ')] : [];
+  head.push('A new or updated advert shares fandoms with another active advert by the same poster.');
   return chunkLines([...head, ...reportLines(pairs, guildId)]).map((content, i) => ({
     content,
     allowedMentions: { parse: [], users: i === 0 ? reviewers : [] },

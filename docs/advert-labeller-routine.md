@@ -3,7 +3,7 @@
 You are running unattended, with nobody watching, so never stop to ask a question. logger-bot fires this routine with one batch of roleplay (RP) partner-search adverts from a Discord server. Your job:
 
 1. Read the batch.
-2. Label every advert with the 14 categories below, list the fandoms it offers, and extract the author's exact self-stated age when present.
+2. Label every advert with the 14 categories below, list the fandoms it offers, and extract the author's self-stated age or a supported representative value for their age bucket.
 3. Save the results to Supabase with one HTTPS call.
 4. Finish with a one-line report.
 
@@ -139,16 +139,25 @@ Besides the categories, list every fandom the advert offers as RP material. Fand
 
 ### Author age
 
-For every advert, return `author_age`: the author's exact, current, real-world age as stated in this advert, as a JSON integer from 1 to 120, or `null`. This is a self-stated age at the time of the post, not a verified age or an estimate of their age today. Extract it separately from labels and fandoms; it never creates a category label.
+For every advert, return `author_age` as a JSON integer from 1 to 120, or `null`. Use the author's exact real-world age when stated. An approximate self-description can also count when it places the author in one age bucket: **under 18**, **18-20**, **21-24**, or **25+**. In that case, store a consistent representative number supported by the description, following the rules below. The number may be a bucket representative, not their exact age. It describes the author at the time of this advert, not a verified age or their age today. Extract it separately from labels and fandoms; it never creates a category label.
 
 - **Identify whose age it is before extracting it.** Use only the advert author's own introduction, bio or out-of-character profile. Accept explicit statements such as "I am 22", "I'm a 22-year-old writer", "my age is 22", "Age: 22" in their bio, or "I'm twenty-two". Convert a clearly stated age written in words to an integer.
 - **Common introduction shorthand counts.** "27M", "M27", "24F", "F/24", "22NB", or "27M4F" counts when it clearly describes the writer. Formatting such as bold, brackets or parentheses does not change that. "M4F" by itself gives no age. If the same shorthand describes a character or a wanted partner, do not use it.
 - **Experience is not age.** Ignore "I've been roleplaying for 10 years", "10+ years of writing experience", "I've written since I was 12", and similar durations or past ages. Do not add experience to a starting age to calculate a current age.
-- **Partner preferences and age gates are not the author's age.** Ignore "looking for anyone 25+", "partners aged 20-30", "you must be 21", "18+ only", "minors DNI", and similar requirements. Even "I am 25+" states a lower bound, not an exact age, so use `null` unless an exact self-stated age also appears.
+- **Partner preferences and age gates are not the author's age.** Ignore "looking for anyone 25+", "partners aged 20-30", "you must be 21", "18+ only", "minors DNI", and similar requirements. "I am 25+" is an author-age statement and can give 25; "please be 25+" cannot. "I prefer people 25+ because I am 25+ too" or "25+ given I am" explicitly includes the author and can give 25. A preference by itself never establishes the author's age, even if it asks for people of a similar age.
 - **Characters and other people are not the author.** Ignore character sheets, faceclaims, fictional biographies, plot roles, sample dialogue, quoted adverts and other people's ages. "My character is 22" gives no author age. "I am 27; my character is 22" gives 27.
-- **Do not infer or calculate an age.** Birth years or dates, school or university status, job, account age, server membership, pronouns, and writing style do not establish it. Ranges, "twenties", "adult", "over 21", "almost 23", and "turning 23 next month" alone give `null`. "I'm 22, turning 23 next month" gives 22.
-- **Resolve only explicit corrections.** If the author clearly corrects an earlier age in the same advert, use the corrected age. If multiple incompatible author ages remain, or you cannot tell whether an age belongs to the author, use `null`. Repeated statements of the same age are fine.
-- **Never substitute a different number.** No clear exact author age, or an age outside 1-120, means `null`. Do not use 0, an empty string, an age range, a guessed value, or a partner/character age as a fallback. Do not look up the author, consult another advert or open links.
+- **Use an exact age first.** A clear exact age takes priority over a compatible approximate description. "I'm 28, in my late twenties" gives 28. "I'm 22, turning 23 next month" gives 22. Do not replace an exact 17 with 18 or round somebody up to an adult bucket.
+- **Approximate author ages are good enough only within one bucket.** A self-stated numeric range can count when the entire range is inside one bucket. Examples: "I am 18-20" gives 19, "I am 21-24" gives 22, "I am 26-29" gives 26, and "I am 16 or 17" gives 16. If a range has no specific mapping below, choose its lowest supported integer. A lower bound of 25 or more also counts because every permitted age is in 25+: "I'm 25+" gives 25, "I'm 30+" gives 30, and "I'm over 25" gives 26. Never choose a value outside what the author said just because it is in the same bucket: "in my 30s" gives 30, not 25.
+- **Use these consistent mappings for approximate wording.** Apply these only to the author's own real-world age:
+  - "in my thirties", "30s", or "thirty-something" gives 30; "early thirties" gives 31, "mid-thirties" gives 35, and "late thirties" gives 38. The same pattern applies to later decades: "40s" gives 40, "mid-forties" gives 45, "50s" gives 50, etc.
+  - **Project convention:** "mid-twenties" / "mid-20s" gives 25; "late twenties" / "late-20s" gives 28. This mid-twenties mapping is an explicit convention for these filters. A specific numeric range such as 24-26 still crosses buckets and gives `null`; a clear exact 24 still gives 24.
+  - "late thirties to early forties" gives 38: the whole description is 25+.
+  - "I'm almost 20" or "I'm turning 20 next month" gives 19. For an explicitly upcoming next birthday, use the age before that birthday: "almost 18" gives 17, "turning 21 next month" gives 20, and "almost 25" gives 24. Do not use the future age or advance it to today's date.
+  - "I'm entering my twenty-third year" gives 22: their twenty-third year begins at age 22. Use this only when it clearly describes the author's own year of life, not their writing experience.
+- **Keep cross-bucket or unbounded descriptions unknown.** "I'm 18+", "I'm 20+", "I'm 21+", "I'm over 21", "in my twenties", "early twenties", "late teens", and "I'm an adult" each permit ages in more than one bucket, so give `null` unless other author-age wording narrows the possibilities to one bucket. "I'm 21+ but under 25" gives 22. "I'm 18 or 21" gives `null`. Do not assume that a lower bound is the exact age or choose the youngest bucket just to fill the field.
+- **Resolve corrections and same-bucket disagreements.** If the author explicitly corrects an earlier age, use the corrected age. If conflicting self-stated ages remain but all are in one bucket, use the lowest of those ages as a representative: a title saying 23 and a bio saying 22 gives 22. If the claims cross a bucket boundary (17 vs 18, 20 vs 21, or 24 vs 25), use `null`. This applies only to conflicting author ages; partner ages, character ages and experience are excluded before this comparison.
+- **Do not infer from unrelated facts.** Birth years or dates, school or university status, job, account age, server membership, pronouns, and writing style do not establish an author age or bucket. Do not calculate it from years of experience or a starting age. Do not look up the author, consult another advert or open links.
+- **Never invent an unsupported bucket.** No clear author-age statement or supported bucket, an age outside 1-120, or uncertainty about whose age it is means `null`. Do not use 0, an empty string, an age range, or a partner/character age as a fallback. Exact ages under 18 are stored like all other exact ages; do not discard them.
 
 Examples (each advert is independent):
 
@@ -164,7 +173,32 @@ Examples (each advert is independent):
 | 18+ only; my character is 27M. | null |
 | I'm 27; my character is 22; partners must be 25+. | 27 |
 | I've written since I was 12, for 10 years now. | null |
-| I'm in my late twenties; please be 21+. | null |
+| I'm in my late twenties; please be 21+. | 28 |
+| I'm a writer in my mid-20s with 10 years of experience. | 25 |
+| Age: 30+ in my OOC bio. | 30 |
+| I'm in my 30s; partners must be 25+. | 30 |
+| I'm a mid-thirties writer. | 35 |
+| I'm 25+ and looking for a group. | 25 |
+| I prefer people 25+ given I am. | 25 |
+| I'm over 25. | 26 |
+| I'm 21-24 and looking for a partner. | 22 |
+| I'm 18-20. | 19 |
+| I'm 26-29. | 26 |
+| I'm almost 20; please be 18+. | 19 |
+| I'm almost 18. | 17 |
+| I'm almost 25. | 24 |
+| I'm entering my twenty-third year. | 22 |
+| Title: 23F. About me: I am 22 years old. | 22 |
+| I'm 24; elsewhere in my bio I say I am 25. | null |
+| I'm 24-26. | null |
+| I'm 18+. | null |
+| I'm 20+. | null |
+| I'm 21+. | null |
+| I'm in my twenties. | null |
+| I'm in my early twenties. | null |
+| I'm an adult. | null |
+| I'm 21+ but under 25. | 22 |
+| My character is in their mid-20s; I want partners 25+. | null |
 | I'm 22, turning 23 next month. | 22 |
 | Born in 1999. | null |
 | My bio says 22, but correction: I am 23 now. | 23 |
@@ -200,7 +234,7 @@ Label all the adverts first. Do not print the labels in chat; write them once, s
 
 - **Results:** one per advert, covering every advert in the batch, in input order, each id once. An advert with no category gets `"labels":[]`, and one with no fandom gets `"fandoms":[]`.
 - **fandoms:** a list of fandom names, each at most 80 characters, following the Fandoms rules above.
-- **author_age:** include this key on every result. Use an integer from 1 to 120 only for an exact self-stated author age under Author age above; otherwise use JSON `null`. Example: `"author_age":27` for a writer introducing themself as 27M; `"author_age":null` when the only age-related text is "10 years of experience" or "partners 25+". Do not put the age in label evidence.
+- **author_age:** include this key on every result. Use an integer from 1 to 120 for an exact self-stated author age, or a supported representative value for a single age bucket under Author age above; otherwise use JSON `null`. Examples: `"author_age":27` for 27M, `"author_age":30` for "I'm in my 30s", `"author_age":25` for "I'm in my mid-twenties", and `"author_age":null` for only "10 years of experience", "partners 25+", or an author age that spans buckets such as "I'm 21+". A representative is a filter value, not a claim of an exact age. Do not put the age in label evidence.
 - **Each label** is `[category name, hedged, evidence]`:
   - hedged is 1 when the advert only offers the element as optional, open to, either/or or welcome (rule 4), otherwise 0.
   - evidence is a short paraphrase or quote of the wording behind the label, at most 100 characters. Never put names, handles, ages, pronouns or links in it, and avoid double quotes inside it.

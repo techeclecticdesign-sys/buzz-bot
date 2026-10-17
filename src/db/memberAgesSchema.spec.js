@@ -4,6 +4,7 @@ const { PGlite } = require('@electric-sql/pglite');
 const { initMemberAges } = require('./memberAgesSchema');
 const { pool } = require('./pool');
 const { setMemberAge, setMemberAges, deleteMemberState, pruneDepartedMemberState } = require('./memberState');
+const { pruneDepartedUserState } = require('./userState');
 after(() => pool.end());
 
 test('age migration, monotonic updates, and existing member cleanup operate on the same persisted row', async (t) => {
@@ -40,6 +41,19 @@ test('age migration, monotonic updates, and existing member cleanup operate on t
   await setMemberAge('a', 19, '2027-05-05T12:00:00Z', '401');
   assert.equal(await row('a'), undefined);
   await setMemberAge('b', 17, '2025-05-05T12:00:00Z', '500');
+  // A full roster is a snapshot. Do not delete members whose join was persisted
+  // after the snapshot began, even if they were not included in that response.
+  await db.exec(`UPDATE member_state SET updated_at = '2025-01-01' WHERE user_id = 'b';
+    UPDATE member_state SET updated_at = '2023-01-01' WHERE user_id = 'c';
+    CREATE TABLE user_state (user_id TEXT PRIMARY KEY, updated_at TIMESTAMPTZ);
+    INSERT INTO user_state VALUES ('b', '2025-01-01'), ('c', '2023-01-01');`);
+  await pruneDepartedMemberState([], '2024-01-01');
+  await pruneDepartedUserState([], '2024-01-01');
+  assert.equal((await row('b')).age_stated, 17);
+  assert.equal(await row('c'), undefined);
+  assert.deepEqual((await db.query('SELECT user_id FROM user_state')).rows, [{ user_id: 'b' }]);
   await pruneDepartedMemberState(['a']);
   assert.equal(await row('b'), undefined);
+  await pruneDepartedUserState([]);
+  assert.equal((await db.query('SELECT * FROM user_state')).rows.length, 0);
 });

@@ -561,8 +561,10 @@ client.on(Events.GuildMemberRemove, async (member) => {
   // the same keys as the change trackers so an in-flight update can't re-write the
   // row after we drop it. A rejoin then seeds fresh from their actual (empty) roles.
   try {
-    await memberAges.onLeave(member);
-    await queueMemberChange(`user:${member.id}`, () => db.deleteUserState(member.id));
+    await Promise.all([
+      memberAges.onLeave(member),
+      queueMemberChange(`user:${member.id}`, () => db.deleteUserState(member.id)),
+    ]);
   } catch (err) {
     console.error('[member-remove] db error:', err.message);
   }
@@ -576,6 +578,7 @@ client.on(Events.GuildMemberRemove, async (member) => {
 
 client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   if (!LOGGING_ENABLED) return;
+  const isCurrent = memberAges.current(newMember);
   try {
     if (newMember.partial) newMember = await newMember.fetch();
   } catch {
@@ -583,7 +586,9 @@ client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   }
   try {
     const member = newMember;
-    await queueMemberChange(`${member.guild.id}:${member.id}`, () => trackMemberChanges(member));
+    await queueMemberChange(`${member.guild.id}:${member.id}`, () => {
+      if (isCurrent()) return trackMemberChanges(member);
+    });
   } catch (err) {
     console.error('[member-update] error:', err.message);
   }
@@ -595,7 +600,11 @@ client.on(Events.UserUpdate, async (_oldUser, newUser) => {
     // Serialize per user: userUpdate also fires for avatars and Discord can
     // deliver duplicates, so two handlers could diff the same stale user_state and
     // double-post. The `user:` prefix avoids colliding with guild-member keys.
-    await queueMemberChange(`user:${newUser.id}`, () => trackUserNameChanges(newUser));
+    await queueMemberChange(`user:${newUser.id}`, () => {
+      if ([...client.guilds.cache.values()].some((g) => g.members.cache.has(newUser.id))) {
+        return trackUserNameChanges(newUser);
+      }
+    });
   } catch (err) {
     console.error('[user-update] error:', err.message);
   }
@@ -667,6 +676,7 @@ client.once(Events.ClientReady, async () => {
   if (needMessageIntents) {
     for (const guild of client.guilds.cache.values()) {
       try {
+        const startedAt = new Date();
         const members = await guild.members.fetch();
         if (LOGGING_ENABLED) {
           for (const member of members.values()) {
@@ -687,8 +697,8 @@ client.once(Events.ClientReady, async () => {
         // no guild_id, so only safe when this is the bot's only guild.
         if (client.guilds.cache.size === 1 && members.size > 0) {
           const present = [...guild.members.cache.keys()];
-          const goneMembers = await db.pruneDepartedMemberState(present);
-          const goneUsers = await db.pruneDepartedUserState(present);
+          const goneMembers = await db.pruneDepartedMemberState(present, startedAt);
+          const goneUsers = await db.pruneDepartedUserState(present, startedAt);
           if (goneMembers || goneUsers) {
             console.log(`[seed] dropped ${goneMembers} member_state / ${goneUsers} user_state row(s) for departed members`);
           }

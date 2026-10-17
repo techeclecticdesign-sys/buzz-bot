@@ -33,10 +33,11 @@ async function deleteUserState(userId) {
   await query('DELETE FROM user_state WHERE user_id = $1', [userId]);
 }
 
-async function pruneDepartedUserState(presentIds) {
+async function pruneDepartedUserState(presentIds, before = null) {
   const res = await query(
-    'DELETE FROM user_state WHERE NOT (user_id = ANY($1::text[]))',
-    [presentIds]
+    `DELETE FROM user_state WHERE NOT (user_id = ANY($1::text[]))
+      AND ($2::timestamptz IS NULL OR updated_at < $2 OR updated_at IS NULL)`,
+    [presentIds, before]
   );
   return res.rowCount;
 }

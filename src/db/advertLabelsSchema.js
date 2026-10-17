@@ -74,7 +74,7 @@ const TABLES_SQL = `
     CONSTRAINT advert_labels_categories_check
       CHECK (categories <@ ${CATEGORY_ARRAY_SQL} AND firm_categories <@ categories)
   );
-  -- Existing installs predate age extraction. NULL means no exact author age
+  -- Existing installs predate age extraction. NULL means no supported author age
   -- was identified (or the older routine did not extract it).
   ALTER TABLE advert_labels ADD COLUMN IF NOT EXISTS
     author_age INT CHECK (author_age BETWEEN 1 AND 120);
@@ -212,8 +212,9 @@ BEGIN
       CONTINUE;
     END IF;
 
-    -- Optional exact, self-stated author age. Never coerce strings, round a
-    -- fraction, or clamp a range. Older routines can omit it; NULL means unknown.
+    -- Optional self-stated age or a representative selected by the routine
+    -- within one supported age bucket. Never coerce strings, round a fraction,
+    -- or clamp a range. Older routines can omit it; NULL means unknown.
     out_author_age := NULL;
     IF r ? 'author_age' AND jsonb_typeof(r -> 'author_age') <> 'null' THEN
       IF jsonb_typeof(r -> 'author_age') IS DISTINCT FROM 'number' THEN

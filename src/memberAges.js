@@ -15,23 +15,34 @@ function parseAge(content) {
 function create({ store = db, channelId = CHANNEL_ID, enabled = ENABLED } = {}) {
   const departed = new Set();
   const key = (member) => `${member.guild.id}:${member.id}`;
+  const versions = new Map();
+  const version = (member) => versions.get(key(member)) ?? 0;
+  // A leave followed by a rejoin must invalidate work started in the old stay,
+  // even though the user is once again present when the fetch finally resolves.
+  function current(member) {
+    const expected = version(member);
+    return () => version(member) === expected && !departed.has(key(member));
+  }
 
   function onJoin(member) {
+    versions.set(key(member), version(member) + 1);
     departed.delete(key(member));
   }
 
   function onLeave(member) {
+    versions.set(key(member), version(member) + 1);
     departed.add(key(member)); // synchronous, so an in-flight scan sees it
     return queueMemberChange(key(member), () => store.deleteMemberState(member.id));
   }
 
-  async function save(message, member, { seed = false } = {}) {
+  async function save(message, member, isCurrent) {
     const age = parseAge(message.content);
     if (age === null || message.author?.bot || !member || member.user?.bot) return false;
     return queueMemberChange(key(member), async () => {
-      if (departed.has(key(member))) return false;
-      if (seed) await store.seedMemberState(member.id, member.user.tag, member.nickname ?? null,
+      if (!isCurrent()) return false;
+      await store.seedMemberState(member.id, member.user.tag, member.nickname ?? null,
         memberRoleIds(member), member.displayName ?? null);
+      if (!isCurrent()) return false;
       return !!(await store.setMemberAge(member.id, age, message.createdAt, message.id));
     });
   }
@@ -39,6 +50,7 @@ function create({ store = db, channelId = CHANNEL_ID, enabled = ENABLED } = {}) 
   async function onMessage(message) {
     if (!enabled || message.channelId !== channelId || !message.guild || message.author?.bot
         || parseAge(message.content) === null) return false;
+    const isCurrent = current({ guild: message.guild, id: message.author.id });
     // Force a current membership check; do not trust a cached departed member.
     let member;
     try {
@@ -47,7 +59,7 @@ function create({ store = db, channelId = CHANNEL_ID, enabled = ENABLED } = {}) 
       if (err.status === 404 || err.code === 10007) return false;
       throw err;
     }
-    return save(message, member, { seed: true });
+    return save(message, member, isCurrent);
   }
 
   async function backfill(client) {
@@ -56,9 +68,14 @@ function create({ store = db, channelId = CHANNEL_ID, enabled = ENABLED } = {}) 
     if (!channel?.guild || !channel.messages) throw new Error('age channel is not a guild text channel');
     console.log('[member-ages] fetching current members and scanning age-channel history');
     // No pruning or writes if the full member fetch fails.
+    const startedAt = new Date();
+    const initialVersions = new Map(versions);
     const members = await channel.guild.members.fetch();
     if (!members.size) throw new Error('full member list is empty; age backfill skipped');
-    if (client.guilds.cache.size === 1) await store.pruneDepartedMemberState([...members.keys()]);
+    if (client.guilds.cache.size === 1) {
+      const present = channel.guild.members.cache ?? members;
+      await store.pruneDepartedMemberState([...present.keys()], startedAt);
+    }
     const seen = new Set();
     let before;
     let scanned = 0;
@@ -74,14 +91,16 @@ function create({ store = db, channelId = CHANNEL_ID, enabled = ENABLED } = {}) 
         const id = message.author?.id;
         if (!members.has(id) || seen.has(id) || message.author.bot || parseAge(message.content) === null) continue;
         seen.add(id);
-        pending.push({ message, member: members.get(id) });
+        const member = members.get(id);
+        const expected = initialVersions.get(key(member)) ?? 0;
+        pending.push({ message, member, isCurrent: () => version(member) === expected && !departed.has(key(member)) });
       }
       // Hold the same per-member queues as live updates and departure cleanup.
       // Sorted acquisition avoids deadlock between concurrent backfills.
       pending.sort((a, b) => key(a.member).localeCompare(key(b.member)));
       const locked = (i) => i < pending.length
         ? queueMemberChange(key(pending[i].member), () => locked(i + 1))
-        : store.setMemberAges(pending.filter(({ member }) => !departed.has(key(member))).map(({ message, member }) => ({
+        : store.setMemberAges(pending.filter(({ isCurrent }) => isCurrent()).map(({ message, member }) => ({
           user_id: member.id, user_tag: member.user.tag, nickname: member.nickname ?? null,
           display_name: member.displayName ?? null, role_ids: memberRoleIds(member),
           age_stated: parseAge(message.content), age_stated_at: message.createdAt, age_message_id: message.id,
@@ -96,7 +115,7 @@ function create({ store = db, channelId = CHANNEL_ID, enabled = ENABLED } = {}) 
     return { scanned, members: seen.size, saved };
   }
 
-  return { onJoin, onLeave, onMessage, backfill };
+  return { onJoin, onLeave, onMessage, backfill, current };
 }
 
 if (require.main === module) {

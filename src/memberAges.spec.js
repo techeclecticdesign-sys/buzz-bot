@@ -10,7 +10,7 @@ function member(id) {
 }
 function message(id, userId, content, time = '2025-05-05T12:00:00Z') {
   return { id, author: { id: userId, bot: false }, content, createdAt: new Date(time),
-    channelId: CHANNEL_ID, guild: { members: { fetch: async () => member(userId) } } };
+    channelId: CHANNEL_ID, guild: { id: 'guild', members: { fetch: async () => member(userId) } } };
 }
 function store() {
   const records = new Map();
@@ -104,4 +104,49 @@ test('a departure during a pending age fetch cannot recreate the member; a rejoi
   tracker.onJoin(member('a'));
   await tracker.onMessage(message('201', 'a', '19'));
   assert.equal(data.records.get('a').age, 19);
+});
+
+test('an age fetch from a previous membership cannot write after a leave and rejoin', async () => {
+  const data = store();
+  const tracker = create({ store: data });
+  let resolve;
+  const pending = message('200', 'a', '18');
+  pending.guild.members.fetch = () => new Promise((r) => { resolve = r; });
+  const task = tracker.onMessage(pending);
+  await tracker.onLeave(member('a'));
+  tracker.onJoin(member('a'));
+  resolve(member('a'));
+  assert.equal(await task, false);
+  assert.equal(data.records.has('a'), false);
+  await tracker.onMessage(message('201', 'a', '19'));
+  assert.equal(data.records.get('a').age, 19);
+});
+
+test('history pages cannot restore the old baseline after a leave and rejoin during backfill', async () => {
+  const data = store();
+  const tracker = create({ store: data });
+  const members = new Map([['a', member('a')]]);
+  let page = 0;
+  const client = { guilds: { cache: new Map([['guild', {}]]) }, channels: { fetch: async () => ({
+    guild: { members: { fetch: async () => members } },
+    messages: { fetch: async () => {
+      if (page++) return new Map();
+      await tracker.onLeave(member('a'));
+      tracker.onJoin(member('a'));
+      return new Map([['200', message('200', 'a', '18')]]);
+    } },
+  }) } };
+  await tracker.backfill(client);
+  assert.equal(data.records.has('a'), false);
+});
+
+test('a queued member update is invalidated on departure, including a later rejoin', async () => {
+  const tracker = create({ store: store() });
+  const isCurrent = tracker.current(member('a'));
+  assert.equal(isCurrent(), true);
+  await tracker.onLeave(member('a'));
+  assert.equal(isCurrent(), false);
+  tracker.onJoin(member('a'));
+  assert.equal(isCurrent(), false);
+  assert.equal(tracker.current(member('a'))(), true);
 });
