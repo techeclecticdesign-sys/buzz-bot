@@ -27,6 +27,7 @@ const db = require('./db');
 const config = require('./config');
 const advertConfig = require('./advertConfig');
 const { advertContentHash } = require('./advertHash');
+const { stripAttribution } = require('./advertAttribution');
 
 const ENABLED = config.flag('LABEL_ENABLED');
 const DRY_RUN = config.flag('LABEL_DRY_RUN');
@@ -96,7 +97,7 @@ function easternInstant(date, hour) {
 // (the name can carry meaning, the id can't), mentions to placeholders, runs of
 // blank lines collapsed. Only saves bytes; the rev is always of the stored text.
 function compactForLabelling(content) {
-  return String(content ?? '')
+  return stripAttribution(String(content ?? ''))
     .replace(/<a?:(\w{1,32}):\d{5,}>/g, ':$1:')
     .replace(/<@!?\d{5,}>/g, '@user')
     .replace(/<@&\d{5,}>/g, '@role')

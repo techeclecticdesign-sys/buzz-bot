@@ -30,6 +30,7 @@ const adultCheck = require('./adultCheck');
 const surveySubmissions = require('./surveySubmissions');
 const advertReconcile = require('./advertReconcile');
 const advertLabeller = require('./advertLabeller');
+const { siteAdvertAuthor } = require('./advertAttribution');
 const fandomReport = require('./fandomReport');
 const pfpGuard = require('./pfpGuard');
 const { sleep } = require('./util');
@@ -118,13 +119,19 @@ async function botDeletedByLine(guild) {
   return displayName;
 }
 
+// The member an ad posted from rpc-web belongs to (null for any other message).
+// These come from our own webhook, so they're bot posts that IGNORE_BOTS would drop.
+function siteAuthor(message) {
+  return siteAdvertAuthor(message, client.application?.id, advertConfig.ALL_ADVERT_CHANNELS);
+}
+
 function shouldTrack(message) {
   if (!message.guildId) return false; // ignore DMs
   if (message.channelId === memberAgesFactory.CHANNEL_ID) return false; // age baseline only; no raw archive
   if (message.channelId === LOG_CHANNEL_ID) return false; // avoid feedback loops
   if (isIgnoredMessage(message)) return false; // IGNORE_CHANNELS opt-out
   if (message.author?.id === client.user.id) return false;
-  if (IGNORE_BOTS && message.author?.bot) return false;
+  if (IGNORE_BOTS && message.author?.bot && !siteAuthor(message)) return false;
   return true;
 }
 
@@ -167,7 +174,7 @@ client.on('messageCreate', async (message) => {
   if (!shouldTrack(message)) return;
   if (LOGGING_ENABLED) {
     try {
-      await db.upsertMessage(message);
+      await db.upsertMessage(message, { author: siteAuthor(message) ?? undefined });
       // Group-ad images are captured after the row exists (setAdvertAttachments
       // updates it). Own try/catch inside, so it never masks the insert error.
       await advertSync.syncAdvertImages(message);
@@ -289,7 +296,7 @@ client.on('messageUpdate', async (_oldMessage, newMessage) => {
     if (stored) {
       await db.updateContent(newMessage.id, newMessage.content ?? '', new Date());
     } else {
-      await db.upsertMessage(newMessage);
+      await db.upsertMessage(newMessage, { author: siteAuthor(newMessage) ?? undefined });
     }
     // Reconcile group-ad images (row exists now for the FK); only re-downloads
     // when the image set changed.
@@ -311,7 +318,8 @@ client.on('messageDelete', async (message) => {
   // IGNORE_BOTS applies to the post's author, not the deleter: a bot's post was
   // never archived, so skip it (a human post deleted by a bot is still logged).
   // Catches cached bot posts; uncached ones are handled after the row lookup.
-  if (IGNORE_BOTS && message.author?.bot) return;
+  // Ads posted from rpc-web are archived, so their deletes are tracked.
+  if (IGNORE_BOTS && message.author?.bot && !siteAuthor(message)) return;
   try {
     const stored = await db.getMessage(message.id);
     if (!stored && !message.guildId) return; // uncached DM, nothing to report

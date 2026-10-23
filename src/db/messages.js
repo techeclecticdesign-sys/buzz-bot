@@ -28,13 +28,16 @@ function archiveMessageJson(msg) {
 // present in opts — omitting it leaves the column untouched, so a plain content
 // edit never clobbers a post's stored reactions. Live message creates omit it
 // (a new message has none); backfill passes it for advert posts.
-async function upsertMessage(msg, { archive = true, refresh = false, reactions } = {}) {
+//
+// `author` ({ id, tag }) credits the row to someone other than the message's
+// author: an ad posted from rpc-web by webhook belongs to the member it names.
+async function upsertMessage(msg, { archive = true, refresh = false, reactions, author } = {}) {
   const hasReactions = reactions !== undefined;
   const params = [
     msg.id,
     msg.channelId,
-    msg.author?.id ?? null,
-    msg.author?.tag ?? null,
+    author?.id ?? msg.author?.id ?? null,
+    author?.tag ?? msg.author?.tag ?? null,
     msg.content ?? '',
     msg.createdAt,
   ];

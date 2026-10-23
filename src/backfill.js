@@ -24,6 +24,7 @@ const db = require('./db');
 const { isIgnoredChannel } = require('./ignoredChannels');
 const advertConfig = require('./advertConfig');
 const { reactionSummary } = require('./reactions');
+const { siteAdvertAuthor } = require('./advertAttribution');
 const config = require('./config');
 
 // Mirror the live bot's IGNORE_BOTS behaviour so a backfill doesn't re-seed the
@@ -129,7 +130,9 @@ async function backfillChannel(channel) {
     if (batch.size === 0) break;
     for (const msg of batch.values()) {
       if (msg.channelId === process.env.LOG_CHANNEL_ID) continue;
-      if (IGNORE_BOTS && msg.author?.bot) continue;
+      // Ads posted from rpc-web are webhook (bot) posts credited to a member.
+      const siteAuthor = siteAdvertAuthor(msg, client.application?.id, advertConfig.ALL_ADVERT_CHANNELS);
+      if (IGNORE_BOTS && msg.author?.bot && !siteAuthor) continue;
       // Incremental: batches run newest→oldest, so the first already-stored
       // message marks the boundary — every remaining message is older and
       // therefore already archived. Stop here.
@@ -150,7 +153,7 @@ async function backfillChannel(channel) {
         const reactions = ADVERT_CHANNELS.has(msg.channelId)
           ? reactionSummary(msg)
           : undefined;
-        await db.upsertMessage(msg, { archive: false, refresh: true, reactions });
+        await db.upsertMessage(msg, { archive: false, refresh: true, reactions, author: siteAuthor ?? undefined });
         dbCount++;
       }
     }

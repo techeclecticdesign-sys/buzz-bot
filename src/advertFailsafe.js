@@ -12,6 +12,7 @@ const failsafe = require('./failsafe');
 const cfg = require('./advertConfig');
 const checks = require('./advertChecks');
 const infractionSticky = require('./infractionSticky');
+const { stripAttribution } = require('./advertAttribution');
 const config = require('./config');
 
 const { SHARED, INTRO } = cfg;
@@ -208,7 +209,8 @@ async function crossChannelDup(message, content) {
   // itself a dupe and a pair can't both delete themselves — the oldest survives.
   const selfId = BigInt(message.id);
   for (const r of rows) {
-    if (BigInt(r.id) < selfId && checks.normalizeForDupe(r.content) === norm) return r.channel_id;
+    // An ad posted from rpc-web is compared without its attribution.
+    if (BigInt(r.id) < selfId && checks.normalizeForDupe(stripAttribution(r.content)) === norm) return r.channel_id;
   }
   return null;
 }
