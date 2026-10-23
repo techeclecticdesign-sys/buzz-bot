@@ -3,6 +3,7 @@
 // db.setAdvertAttachments, which stores the bytes so the browse site can show
 // them even after Discord's signed CDN urls expire.
 
+const sharp = require('sharp');
 const advertConfig = require('./advertConfig');
 
 // Skip anything larger than this so a stray huge upload can't bloat the table.
@@ -82,11 +83,54 @@ async function downloadImages(descriptors) {
   return results.map((r, i) => ({ ...r, pos: i }));
 }
 
+// Stored images are re-encoded as WebP no larger than this on either side: the site
+// serves them from the database on every view, so their size is its cost.
+const MAX_DIMENSION = 2048;
+const WEBP_QUALITY = 85;
+
+// One downloaded image as WebP, scaled to fit MAX_DIMENSION (animation kept, EXIF
+// orientation applied, metadata dropped). Keeps the original when the WebP isn't
+// smaller or the image can't be read. The filename stays the original's, since
+// imageSignature compares filenames.
+async function shrinkImage(img) {
+  try {
+    const meta = await sharp(img.buffer).metadata();
+    const animated = (meta.pages ?? 1) > 1;
+    let pipeline = sharp(img.buffer, { animated });
+    if (!animated) pipeline = pipeline.rotate();
+    const { data, info } = await pipeline
+      .resize(MAX_DIMENSION, MAX_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: WEBP_QUALITY })
+      .toBuffer({ resolveWithObject: true });
+    if (data.length >= img.buffer.length) return img;
+    return {
+      ...img,
+      buffer: data,
+      size: data.length,
+      contentType: 'image/webp',
+      width: info.width,
+      // An animation's frames are stacked: info.height is all of them.
+      height: animated ? info.pageHeight ?? Math.round(info.height / meta.pages) : info.height,
+    };
+  } catch {
+    return img;
+  }
+}
+
+async function shrinkImages(images) {
+  const out = [];
+  for (const img of images) out.push(await shrinkImage(img));
+  return out;
+}
+
 module.exports = {
   MAX_IMAGE_BYTES,
+  MAX_DIMENSION,
   isGroupChannel,
   isImage,
   imageSignature,
   fromDiscordMessage,
   downloadImages,
+  shrinkImage,
+  shrinkImages,
 };

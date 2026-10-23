@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { isImage, imageSignature, fromDiscordMessage } = require('./advertImages');
+const sharp = require('sharp');
+const { isImage, imageSignature, fromDiscordMessage, shrinkImage, MAX_DIMENSION } = require('./advertImages');
 
 // Build a fake discord.js message: `.attachments` just needs `.values()`, so a
 // Map does the job. Each attachment mirrors the fields fromDiscordMessage reads.
@@ -92,4 +93,45 @@ test('fromDiscordMessage: defaults a missing content-type to octet-stream', () =
   const out = fromDiscordMessage(msg);
   assert.equal(out.length, 1); // matched by extension
   assert.equal(out[0].contentType, 'application/octet-stream');
+});
+
+// A noisy RGB PNG: realistic enough that WebP beats it.
+async function noisyPng(width, height) {
+  const raw = Buffer.alloc(width * height * 3);
+  let x = 2463534242; // xorshift: noise PNG can't compress
+  for (let i = 0; i < raw.length; i++) {
+    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+    raw[i] = x & 0xff;
+  }
+  return sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+}
+
+test('shrinkImage: scales a large image to fit and stores it as WebP', async () => {
+  const buffer = await noisyPng(3000, 1500);
+  const out = await shrinkImage({ pos: 0, filename: 'banner.png', contentType: 'image/png', width: 3000, height: 1500, buffer });
+  assert.equal(out.contentType, 'image/webp');
+  assert.equal(out.width, MAX_DIMENSION);
+  assert.equal(out.height, 1024);
+  assert.equal(out.size, out.buffer.length);
+  assert.ok(out.buffer.length < buffer.length);
+  assert.equal(out.filename, 'banner.png'); // imageSignature compares filenames
+  assert.equal((await sharp(out.buffer).metadata()).format, 'webp');
+});
+
+test("shrinkImage: keeps an animation's frames and per-frame height", async () => {
+  const frame = (r) => sharp({ create: { width: 40, height: 30, channels: 3, background: { r, g: 0, b: 0 } } }).raw().toBuffer();
+  const frames = await Promise.all([frame(255), frame(0), frame(128)]);
+  const gif = await sharp(Buffer.concat(frames), { raw: { width: 40, height: 90, channels: 3, pageHeight: 30 } })
+    .gif()
+    .toBuffer();
+  const out = await shrinkImage({ pos: 0, filename: 'a.gif', contentType: 'image/gif', buffer: gif });
+  if (out.buffer === gif) return; // already smaller than its WebP: kept as it is
+  assert.equal(out.width, 40);
+  assert.equal(out.height, 30);
+  assert.equal((await sharp(out.buffer, { animated: true }).metadata()).pages, 3);
+});
+
+test('shrinkImage: keeps the original when it cannot be read', async () => {
+  const img = { pos: 0, filename: 'x.png', contentType: 'image/png', buffer: Buffer.from('not an image') };
+  assert.equal(await shrinkImage(img), img);
 });

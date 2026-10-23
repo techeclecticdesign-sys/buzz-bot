@@ -72,7 +72,7 @@ function create({ loggingEnabled, advertChannelSet, advertConfig }) {
         await db.clearAdvertAttachments(message.id);
         return;
       }
-      const images = await advertImages.downloadImages(descriptors);
+      const images = await advertImages.shrinkImages(await advertImages.downloadImages(descriptors));
       await db.setAdvertAttachments(message.id, message.channelId, images);
     } catch (err) {
       console.error('[advert-images] sync error:', err.message);
