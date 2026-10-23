@@ -30,6 +30,7 @@ const adultCheck = require('./adultCheck');
 const surveySubmissions = require('./surveySubmissions');
 const advertReconcile = require('./advertReconcile');
 const advertLabeller = require('./advertLabeller');
+const sitePurge = require('./sitePurge');
 const { siteAdvertAuthor } = require('./advertAttribution');
 const fandomReport = require('./fandomReport');
 const pfpGuard = require('./pfpGuard');
@@ -842,6 +843,11 @@ client.once(Events.ClientReady, async () => {
     runOver: (run) => fandomReport.run(client, run),
   });
 
+  // rpc-web's cached pages for signed-out visitors: advert changes are reported
+  // as they're written (db.onMessagesChanged, below), and every genre and fandom
+  // page is refreshed daily. Off unless RPC_WEB_URL and ADVERT_PURGE_SECRET are set.
+  sitePurge.start();
+
   // Trading-card approvals: catch up on changes made while offline (not awaited:
   // one fetch per card), then sweep new cards every few minutes.
   tcgApproval.start();
@@ -858,6 +864,9 @@ process.on('unhandledRejection', (err) => console.error('[unhandled]', err));
 // Backstop: a throw in a timer/callback would otherwise crash the process and stop
 // logging. Log and stay alive — the bot is stateless per-event and the pool self-heals.
 process.on('uncaughtException', (err) => console.error('[uncaught]', err));
+
+// Advert writes tell rpc-web which cached pages to refresh (sitePurge.js).
+db.onMessagesChanged(sitePurge.report);
 
 db.init()
   .then(() => (game.ENABLED ? game.init() : null))

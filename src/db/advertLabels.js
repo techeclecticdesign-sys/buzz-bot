@@ -277,7 +277,20 @@ async function recentLabelBatches(limit = 10) {
   return rows;
 }
 
+// The stored adverts labelled (by the routine, or inherited) since `since`, as
+// [{ id, channelId }]: a run's new labels, for sitePurge.
+async function labelledSince(promptVersion, since) {
+  const { rows } = await query(
+    `SELECT m.id, m.channel_id FROM advert_labels l
+       JOIN messages m ON m.id = l.message_id
+      WHERE l.prompt_version = $1 AND l.labelled_at >= $2`,
+    [promptVersion, since]
+  );
+  return rows.map((r) => ({ id: r.id, channelId: r.channel_id }));
+}
+
 module.exports = {
+  labelledSince,
   setLabellerTokenHash,
   expireStaleLabelBatches,
   getInFlightLabelBatch,

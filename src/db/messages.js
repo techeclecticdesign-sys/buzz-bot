@@ -3,6 +3,23 @@
 const { pool, query } = require('./pool');
 const jsonArchive = require('../jsonArchive');
 
+// Told which rows a write changed ([{ id, channelId }]) once it has committed.
+// index.js points it at sitePurge, which refreshes rpc-web's cached advert pages.
+let changeListener = null;
+
+function onMessagesChanged(fn) {
+  changeListener = fn;
+}
+
+function reportChanged(rows) {
+  if (!changeListener || !rows.length) return;
+  try {
+    changeListener(rows.map((r) => ({ id: r.id, channelId: r.channel_id })));
+  } catch (err) {
+    console.error('[db] change listener failed:', err.message);
+  }
+}
+
 // Append a message to the optional on-disk JSON archive (no DB write). No-ops
 // unless JSON_ARCHIVE_DIR is set. Attachments live only here, not the DB. Kept
 // separate from the insert so backfill can archive all history to JSON while
@@ -59,6 +76,7 @@ async function upsertMessage(msg, { archive = true, refresh = false, reactions, 
   }
 
   let onConflict = 'NOTHING';
+  let returning = 'id, channel_id';
   if (refresh) {
     const sets = [
       'channel_id = EXCLUDED.channel_id',
@@ -69,27 +87,34 @@ async function upsertMessage(msg, { archive = true, refresh = false, reactions, 
       'deleted_at = NULL',
     ];
     if (hasReactions) sets.push(`reactions = $${reactionsIdx}`);
-    onConflict = `UPDATE SET ${sets.join(', ')} RETURNING (xmax = 0) AS inserted`;
+    onConflict = `UPDATE SET ${sets.join(', ')}`;
+    returning = '(xmax = 0) AS inserted, id, channel_id';
   }
 
   const res = await query(
     `INSERT INTO messages (${cols.join(', ')})
      VALUES (${vals.join(', ')})
-     ON CONFLICT (id) DO ${onConflict}`,
+     ON CONFLICT (id) DO ${onConflict}
+     RETURNING ${returning}`,
     params
   );
+  reportChanged(res.rows);
   const inserted = refresh ? res.rows[0]?.inserted === true : res.rowCount === 1;
   if (inserted && archive) archiveMessageJson(msg);
   return inserted;
 }
 
 // Overwrite just the reaction summary for a stored message (no-op if the message
-// isn't archived). Pass null to clear. Driven by the live reaction handlers.
+// isn't archived, or the summary is unchanged). Pass null to clear. Driven by the
+// live reaction handlers.
 async function setReactions(id, reactions) {
-  await query(
-    'UPDATE messages SET reactions = $2 WHERE id = $1',
+  const res = await query(
+    `UPDATE messages SET reactions = $2::jsonb
+      WHERE id = $1 AND reactions IS DISTINCT FROM $2::jsonb
+      RETURNING id, channel_id`,
     [id, reactions == null ? null : JSON.stringify(reactions)]
   );
+  reportChanged(res.rows);
 }
 
 async function getMessage(id) {
@@ -102,18 +127,24 @@ async function getMessages(ids) {
   return rows;
 }
 
+// No-op when both are unchanged: the daily link check re-saves every invite post
+// it verifies, and only real changes should reach sitePurge.
 async function updateContent(id, content, editedAt) {
-  await query(
-    'UPDATE messages SET content = $2, edited_at = $3 WHERE id = $1',
+  const res = await query(
+    `UPDATE messages SET content = $2, edited_at = $3
+      WHERE id = $1 AND (content IS DISTINCT FROM $2 OR edited_at IS DISTINCT FROM $3)
+      RETURNING id, channel_id`,
     [id, content, editedAt]
   );
+  reportChanged(res.rows);
 }
 
 async function markDeleted(ids) {
-  await query(
-    'UPDATE messages SET deleted_at = now() WHERE id = ANY($1)',
+  const res = await query(
+    'UPDATE messages SET deleted_at = now() WHERE id = ANY($1) RETURNING id, channel_id',
     [Array.isArray(ids) ? ids : [ids]]
   );
+  reportChanged(res.rows);
 }
 
 // Replace the stored image attachments for a group advert. `images` is an array
@@ -132,12 +163,13 @@ async function setAdvertAttachments(messageId, channelId, images) {
     size: a.size ?? (a.buffer ? a.buffer.length : null),
   }));
   const client = await pool.connect();
+  let changed;
   try {
     await client.query('BEGIN');
-    await client.query('UPDATE messages SET attachments = $2 WHERE id = $1', [
-      messageId,
-      meta.length ? JSON.stringify(meta) : null,
-    ]);
+    changed = await client.query(
+      'UPDATE messages SET attachments = $2 WHERE id = $1 RETURNING id, channel_id',
+      [messageId, meta.length ? JSON.stringify(meta) : null]
+    );
     await client.query('DELETE FROM group_advert_images WHERE message_id = $1', [messageId]);
     for (const a of images) {
       await client.query(
@@ -153,13 +185,18 @@ async function setAdvertAttachments(messageId, channelId, images) {
   } finally {
     client.release();
   }
+  reportChanged(changed.rows);
 }
 
 // Drop a group advert's stored images (metadata + bytes). Used when the post is
 // deleted so nothing dangles.
 async function clearAdvertAttachments(messageId) {
-  await query('UPDATE messages SET attachments = NULL WHERE id = $1', [messageId]);
+  const res = await query(
+    'UPDATE messages SET attachments = NULL WHERE id = $1 RETURNING id, channel_id',
+    [messageId]
+  );
   await query('DELETE FROM group_advert_images WHERE message_id = $1', [messageId]);
+  reportChanged(res.rows);
 }
 
 // --- Advert failsafe (reads the message archive; no separate advert state) ---
@@ -215,9 +252,12 @@ async function pruneMessagesInChannels(channelIds, cutoff, limit = 5000) {
        SELECT ctid FROM messages
        WHERE channel_id = ANY($1::text[]) AND created_at IS NOT NULL AND created_at < $2
        LIMIT $3
-     )`,
+     )
+     RETURNING id, channel_id, deleted_at`,
     [channelIds, cutoff, limit]
   );
+  // A row deleted earlier was reported then; only a standing one changes the site.
+  reportChanged(res.rows.filter((r) => r.deleted_at === null));
   return res.rowCount;
 }
 
@@ -255,6 +295,7 @@ async function pruneSoftDeletedMessages(cutoff, limit = 5000) {
 }
 
 module.exports = {
+  onMessagesChanged,
   archiveMessageJson,
   upsertMessage,
   setReactions,

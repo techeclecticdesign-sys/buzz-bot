@@ -28,6 +28,7 @@ const config = require('./config');
 const advertConfig = require('./advertConfig');
 const { advertContentHash } = require('./advertHash');
 const { stripAttribution } = require('./advertAttribution');
+const sitePurge = require('./sitePurge');
 
 const ENABLED = config.flag('LABEL_ENABLED');
 const DRY_RUN = config.flag('LABEL_DRY_RUN');
@@ -269,6 +270,16 @@ async function syncLabellerToken() {
   return true;
 }
 
+// New labels change which genre and fandom pages list an ad. The routine writes
+// them itself, so the ads labelled since `since` are read back for sitePurge.
+async function reportLabelled(since) {
+  try {
+    sitePurge.report(await db.labelledSince(PROMPT_VERSION, since));
+  } catch (err) {
+    console.error('[labeller] site purge report failed:', err.message);
+  }
+}
+
 // --- The daily run ---
 
 let running = false;
@@ -280,9 +291,12 @@ function finish(date, why) {
   finishedDate = date;
   console.log(`[labeller] ${date} run over: ${why}.`);
   // Every batch is saved or given up on by now, so the labels are all in.
-  if (onRunOver && !DRY_RUN) {
+  if (DRY_RUN) return;
+  const runStart = easternInstant(date, RUN_HOUR);
+  reportLabelled(runStart);
+  if (onRunOver) {
     Promise.resolve()
-      .then(() => onRunOver({ date, runStart: easternInstant(date, RUN_HOUR) }))
+      .then(() => onRunOver({ date, runStart }))
       .catch((err) => console.error('[labeller] run-over hook failed:', err.message));
   }
 }
@@ -373,6 +387,16 @@ async function waitForBatch(batchId, { pollMs = WAIT_POLL_MS, limitMs = WAIT_LIM
 async function runAll({ maxBatches = MAX_RUNS_PER_DAY, cutoff = new Date(), wait = {} } = {}) {
   const inFlight = await db.getInFlightLabelBatch();
   if (inFlight) throw new Error(`batch ${inFlight.batch_id} is still waiting on the routine`);
+  // A minute early: the labels are stamped by the database's clock.
+  const started = new Date(Date.now() - 60_000);
+  try {
+    return await labelAll(maxBatches, cutoff, wait);
+  } finally {
+    await reportLabelled(started);
+  }
+}
+
+async function labelAll(maxBatches, cutoff, wait) {
   let saved = 0;
   for (let n = 1; n <= maxBatches; n++) {
     const prepared = await prepareBatch(cutoff);
@@ -449,6 +473,7 @@ if (require.main === module) {
       console.error('[labeller]', err.message);
       process.exitCode = 1;
     })
+    .then(() => sitePurge.flush())
     .finally(() => db.pool.end());
 }
 

@@ -1,6 +1,7 @@
 const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('./db');
+const sitePurge = require('./sitePurge');
 const { advertContentHash } = require('./advertHash');
 const {
   easternInstant,
@@ -10,6 +11,8 @@ const {
   interpretFire,
   prepareBatch,
   runAll,
+  step,
+  PROMPT_VERSION,
 } = require('./advertLabeller');
 
 // Snowflakes past Number.MAX_SAFE_INTEGER: one trip through Number would change them.
@@ -91,6 +94,13 @@ afterEach(() => {
   for (const [name, fn] of Object.entries(originals)) db[name] = fn;
 });
 
+// What the labeller hands sitePurge, in place of sending it.
+let purgeReports = [];
+sitePurge.report = (rows) => purgeReports.push(rows);
+afterEach(() => {
+  purgeReports = [];
+});
+
 test('prepareBatch: a labelled ad is skipped, an edit is sent again, a repost inherits', async () => {
   const [labelled, edited, repost, fresh, twin] = SNOWFLAKES.concat(['1428390012345678904', '1428390012345678905']);
   const inherited = [];
@@ -153,7 +163,13 @@ test('runAll fires batch after batch until nothing is left, and stops at a batch
     // Two rounds of work, then nothing: each batch is saved ('done').
     let round = 0;
     const statuses = [];
+    const labelledSinceCalls = [];
+    const before = Date.now();
     stubDb({
+      labelledSince: async (version, since) => {
+        labelledSinceCalls.push({ version, since });
+        return [{ id: SNOWFLAKES[0], channelId: '504322272618610688' }];
+      },
       getInFlightLabelBatch: async () => null,
       getLabelCandidates: async () =>
         ++round <= 2 ? [{ id: SNOWFLAKES[round - 1], content: `ad ${round}`, labelled_rev: null }] : [],
@@ -169,6 +185,11 @@ test('runAll fires batch after batch until nothing is left, and stops at a batch
     const ok = await runAll({ maxBatches: 10, wait: { pollMs: 1 } });
     assert.deepEqual(ok, { done: true, batches: 2, saved: 2 });
     assert.equal(fires, 2);
+    // The run's labels go to sitePurge: everything labelled since it began.
+    assert.equal(labelledSinceCalls.length, 1);
+    assert.equal(labelledSinceCalls[0].version, PROMPT_VERSION);
+    assert.ok(labelledSinceCalls[0].since.getTime() <= before);
+    assert.deepEqual(purgeReports, [[{ id: SNOWFLAKES[0], channelId: '504322272618610688' }]]);
 
     // A batch the routine never saves: expired after the wait limit, and the run stops.
     let expired = null;
@@ -185,7 +206,29 @@ test('runAll fires batch after batch until nothing is left, and stops at a batch
     assert.match(stopped.why, /expired/);
     assert.ok(expired);
     assert.equal(fires, 3);
+    assert.equal(purgeReports.length, 2, 'a stopped run reports what it labelled too');
   } finally {
     global.fetch = realFetch;
   }
+});
+
+test("the daily run's end reports the ads labelled since it began", async () => {
+  const runStart = easternInstant('2026-10-21', 8);
+  let asked = null;
+  stubDb({
+    expireStaleLabelBatches: async () => [],
+    labelBatchSummarySince: async () => ({ fired: 2, failed: 0 }),
+    getInFlightLabelBatch: async () => null,
+    getLabelCandidates: async () => [], // all caught up: the run is over
+    getLabelsByRev: async () => [],
+    getLabelAttempts: async () => new Map(),
+    labelledSince: async (version, since) => {
+      asked = { version, since };
+      return [{ id: SNOWFLAKES[1], channelId: '504322272618610688' }];
+    },
+  });
+  await step(new Date('2026-10-21T14:30:00Z')); // 10:30 Eastern
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(asked, { version: PROMPT_VERSION, since: runStart });
+  assert.deepEqual(purgeReports, [[{ id: SNOWFLAKES[1], channelId: '504322272618610688' }]]);
 });

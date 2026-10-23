@@ -93,6 +93,10 @@ const MANIFEST = [
   { name: 'ADREVIEWERS', kind: 'idList', default: [], feature: 'labeller', note: 'user ids pinged on each same-fandom report' },
   { name: 'FANDOM_REPORT_ADVERT_CHANNELS', kind: 'idList', default: [], feature: 'labeller', note: 'unset = advertConfig ONE_ON_ONE_CHANNELS' },
   { name: 'LABEL_RETENTION_DAYS', kind: 'num', default: 90, min: 1, feature: 'retention', note: 'labels of gone adverts + the batch log' },
+  // rpc-web cache purge (sitePurge.js)
+  { name: 'RPC_WEB_URL', kind: 'string', default: '', feature: 'site-purge', note: 'e.g. https://www.roleplaycentral.net; empty = off' },
+  { name: 'ADVERT_PURGE_SECRET', kind: 'secret', default: '', feature: 'site-purge', note: "the same as rpc-web's" },
+  { name: 'SITE_PURGE_DAILY_UTC_HOUR', kind: 'num', default: 16, min: 0, max: 23, feature: 'site-purge' },
   // Retention
   { name: 'DB_RETENTION_ENABLED', kind: 'bool', default: true, feature: 'retention' },
   { name: 'ADVERT_RETENTION_DAYS', kind: 'num', default: 365, min: 1, feature: 'retention' },
